@@ -51,7 +51,7 @@ async def browser_probe_cors(request: Request, call_next: Any) -> Response:
     if request.url.path.startswith("/api/email/"):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-ShieldDome-Plugin-Token"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
 
 
@@ -157,11 +157,12 @@ def require_ingest(
     raise HTTPException(status_code=401, detail="请先登录或提供有效的邮件接入 API Key")
 
 
-def require_browser_probe(x_shielddome_plugin_token: str = Header(default="")) -> dict[str, Any]:
-    user = SERVICE.auth.authenticate_plugin_token(x_shielddome_plugin_token)
-    if not user:
-        raise HTTPException(status_code=401, detail="请配置有效的用户插件 Token")
-    return user
+BROWSER_PROBE_ACTOR = {
+    "id": "browser-probe",
+    "username": "browser-probe",
+    "display_name": "浏览器插件",
+    "role": "probe",
+}
 
 
 def safe_probe_page_url(value: Any) -> str:
@@ -219,8 +220,9 @@ def logout(
 
 
 @app.post("/api/email/analyze/quick")
-def browser_probe_quick(payload: dict[str, Any], actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
+def browser_probe_quick(payload: dict[str, Any]) -> dict[str, Any]:
     """Compatibility endpoint used by the downloadable browser probe."""
+    actor = BROWSER_PROBE_ACTOR
     result = PLUGIN_ANALYZER.quick_analyze(payload, actor=actor)
     message_id = str(payload.get("message_id") or "")
     SERVICE.db.record_audit(
@@ -240,18 +242,16 @@ def browser_probe_quick(payload: dict[str, Any], actor: dict[str, Any] = Depends
 
 
 @app.get("/api/email/auth/me")
-def browser_probe_identity(actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
-    return actor
+def browser_probe_identity() -> dict[str, Any]:
+    return BROWSER_PROBE_ACTOR
 
 
 @app.get("/api/email/analyze/status/{analysis_id}")
-def browser_probe_status(analysis_id: str, actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
+def browser_probe_status(analysis_id: str) -> dict[str, Any]:
     try:
-        return PLUGIN_ANALYZER.status(analysis_id, expected_user_id=str(actor["id"]))
+        return PLUGIN_ANALYZER.status(analysis_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/dashboard", dependencies=[Depends(require_console)])

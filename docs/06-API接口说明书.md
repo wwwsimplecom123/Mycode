@@ -22,11 +22,11 @@
 
 - `GET /api/v1/apps`：返回当前网站提供的应用版本、下载地址和 SHA-256。
 - `GET /api/v1/apps/browser-extension/download`：动态打包并下载当前部署的最新版浏览器插件 ZIP。
-- `GET /api/email/auth/me`：校验 `X-ShieldDome-Plugin-Token` 并返回绑定用户。
-- `POST /api/email/analyze/quick`：浏览器探针快速检测接口，必须提供用户插件 Token。
-- `GET /api/email/analyze/status/{analysis_id}`：查询本人提交的浏览器探针深度检测进度。
+- `GET /api/email/auth/me`：浏览器探针连接检查。
+- `POST /api/email/analyze/quick`：浏览器探针快速检测接口。
+- `GET /api/email/analyze/status/{analysis_id}`：查询浏览器探针深度检测进度。
 
-浏览器探针接口允许跨域调用，但强制使用与用户绑定的 `X-ShieldDome-Plugin-Token`，且禁止跨用户查询检测状态。
+浏览器探针接口允许跨域调用，当前未启用用户 Token 验证。插件检测统一记录为 `browser-probe`，部署到不受信网络前应恢复鉴权或增加其他访问控制。
 
 ## 模型密钥配置接口
 

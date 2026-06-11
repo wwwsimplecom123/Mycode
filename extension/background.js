@@ -23,8 +23,6 @@ async function apiRequest(message) {
     credentials: "omit",
     headers: {},
   };
-  const pluginToken = String(message.pluginToken || "").trim();
-  if (pluginToken) options.headers["X-ShieldDome-Plugin-Token"] = pluginToken;
   if (message.payload !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(message.payload);
@@ -73,10 +71,11 @@ chrome.action.onClicked.addListener(() => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(["shielddomeApiBase", "shielddomeApiConfiguredByUser", "shielddomePluginToken"], (settings) => {
+  chrome.storage.local.get(["shielddomeApiBase", "shielddomeApiConfiguredByUser"], (settings) => {
     const apiBase = String(settings.shielddomeApiBase || "").trim();
     const legacyLoopbackDefault = !settings.shielddomeApiConfiguredByUser && /^http:\/\/(?:127\.0\.0\.1|localhost):8000$/i.test(apiBase);
     if (legacyLoopbackDefault) chrome.storage.local.remove(["shielddomeApiBase"]);
-    if (!apiBase || !settings.shielddomePluginToken || legacyLoopbackDefault) chrome.runtime.openOptionsPage();
+    chrome.storage.local.remove(["shielddomePluginToken"]);
+    if (!apiBase || legacyLoopbackDefault) chrome.runtime.openOptionsPage();
   });
 });

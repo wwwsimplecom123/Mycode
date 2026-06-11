@@ -1,0 +1,8 @@
+/var/log/shielddome/*.log {
+    daily
+    rotate 30
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

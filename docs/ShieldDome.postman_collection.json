@@ -1,0 +1,42 @@
+{
+  "info": {
+    "name": "ShieldDome Enterprise API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "https://shielddome.example.internal"},
+    {"key": "adminToken", "value": ""},
+    {"key": "ingestToken", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {"method": "GET", "url": "{{baseUrl}}/api/v1/health"}
+    },
+    {
+      "name": "Upload EML",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "X-API-Key", "value": "{{ingestToken}}"}],
+        "body": {"mode": "formdata", "formdata": [{"key": "file", "type": "file", "src": ""}]},
+        "url": "{{baseUrl}}/api/v1/messages/analyze"
+      }
+    },
+    {
+      "name": "List Analyses",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "X-API-Key", "value": "{{adminToken}}"}],
+        "url": "{{baseUrl}}/api/v1/analyses"
+      }
+    },
+    {
+      "name": "List Knowledge",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "X-API-Key", "value": "{{adminToken}}"}],
+        "url": "{{baseUrl}}/api/v1/knowledge"
+      }
+    }
+  ]
+}

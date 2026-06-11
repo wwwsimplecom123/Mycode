@@ -1,0 +1,14 @@
+From: Superior Notice <notice@superior.example>
+To: employee@company.com
+Subject: 紧急：统一身份认证密码验证
+Message-ID: <phishing-test-1@superior.example>
+Authentication-Results: mx.company.com; spf=pass; dkim=pass; dmarc=pass
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html>
+  <body>
+    <p>上级单位通知：请立即登录统一身份认证系统完成密码验证，否则账号将被冻结。</p>
+    <p><a href="https://evil-login.com/reset">https://sso.company.com/reset</a></p>
+  </body>
+</html>

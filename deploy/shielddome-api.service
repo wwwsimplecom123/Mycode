@@ -1,0 +1,21 @@
+[Unit]
+Description=ShieldDome Enterprise API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shielddome
+Group=shielddome
+WorkingDirectory=/opt/shielddome
+EnvironmentFile=/etc/shielddome/shielddome.env
+ExecStart=/opt/shielddome/.venv/bin/uvicorn app.api:app --host 127.0.0.1 --port 8000 --workers 2 --limit-concurrency 100
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/shielddome /var/log/shielddome
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=ShieldDome Analysis Worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shielddome
+Group=shielddome
+WorkingDirectory=/opt/shielddome
+EnvironmentFile=/etc/shielddome/shielddome.env
+ExecStart=/opt/shielddome/.venv/bin/python app/worker.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/shielddome /var/log/shielddome
+
+[Install]
+WantedBy=multi-user.target

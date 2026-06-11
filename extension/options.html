@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ShieldDome 插件设置</title>
+  <style>
+    body{font-family:"Microsoft YaHei",sans-serif;margin:0;background:#f3f6fa;color:#243047}
+    main{max-width:640px;margin:60px auto;background:#fff;border:1px solid #dfe7f2;border-radius:10px;padding:28px}
+    label{display:grid;gap:8px;margin:24px 0}input{padding:11px;border:1px solid #ccd7e6;border-radius:5px}
+    button{background:#5b91f5;color:#fff;border:0;border-radius:5px;padding:10px 16px;cursor:pointer}
+    p,small{color:#778398}.message{color:#24764f}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ShieldDome 企业邮件安全探针</h1>
+    <p>填写当前浏览器能够访问的 ShieldDome 服务器地址。虚拟机或员工终端必须填写远程服务器地址，不能使用 <code>127.0.0.1</code>。</p>
+    <label>ShieldDome 服务地址<input id="api-base" type="url" placeholder="https://shielddome.company.example"></label>
+    <label>用户插件 Token<input id="plugin-token" type="password" autocomplete="off" placeholder="粘贴管理员分配的 sdp_ 用户 Token"></label>
+    <button id="save" type="button">保存并授权连接</button>
+    <p id="message" class="message"></p>
+    <small>用户插件 Token 与个人账号绑定，用于检测鉴权和责任追溯，请勿共享。推荐使用 HTTPS 域名，例如 <code>https://shielddome.company.example</code>。</small>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

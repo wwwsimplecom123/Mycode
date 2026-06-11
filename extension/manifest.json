@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "ShieldDome 企业邮件安全探针",
+  "version": "1.6.0",
+  "description": "连接 ShieldDome 企业平台的浏览器邮件风险探针",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_title": "配置 ShieldDome 服务地址"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

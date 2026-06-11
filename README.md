@@ -5,7 +5,7 @@ ShieldDome 是面向 Linux 私有化部署的企业钓鱼邮件检测平台。�
 ## 核心能力
 
 - FastAPI 企业 API 与独立持久化 Analysis Worker。
-- PostgreSQL + pgvector；开发环境可零依赖回退到 SQLite。
+- PostgreSQL + pgvector；开发环境可零依赖回退到 SQLite。mkdir git  && cd git
 - `.eml` 解析、SPF/DKIM/DMARC 结果提取、链接伪装和附件静态特征。
 - 可审核 RAG 知识库、Embedding API、LLM API 与故障降级。
 - Vue 3 + Element Plus + ECharts 企业管理控制台。
@@ -14,7 +14,7 @@ ShieldDome 是面向 Linux 私有化部署的企业钓鱼邮件检测平台。�
 ## 本地核心测试
 
 ```powershell
-& 'C:\Users\huohuo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m unittest discover -s tests -v
+python.exe -m unittest discover -s tests -v
 ```
 
 ## Windows 本地网页测试
@@ -41,7 +41,7 @@ powershell -ExecutionPolicy Bypass -File scripts\stop-windows.ps1
 如需重新安装本地验证依赖：
 
 ```powershell
-& 'C:\Users\huohuo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m pip install --target .deps -r requirements.txt
+python.exe -m pip install --target .deps -r requirements.txt
 ```
 
 安装 `requirements.txt` 后运行企业 API 与 Worker：

@@ -16,10 +16,10 @@
   <main>
     <h1>ShieldDome 企业邮件安全探针</h1>
     <p>填写当前浏览器能够访问的 ShieldDome 服务器地址。虚拟机或员工终端必须填写远程服务器地址，不能使用 <code>127.0.0.1</code>。</p>
-    <label>ShieldDome 服务地址<input id="api-base" type="url" placeholder="https://shielddome.company.example"></label>
+    <label>ShieldDome 服务地址<input id="api-base" type="url" placeholder="http://49.233.35.52"></label>
     <button id="save" type="button">保存并授权连接</button>
     <p id="message" class="message"></p>
-    <small>推荐使用 HTTPS 域名，例如 <code>https://shielddome.company.example</code>。</small>
+    <small>支持 HTTP 和 HTTPS。测试或内网环境可使用 HTTP，正式部署推荐 HTTPS。</small>
   </main>
   <script src="options.js"></script>
 </body>

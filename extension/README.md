@@ -4,7 +4,7 @@
 
 ## Chrome / Edge 本地加载
 
-1. 先启动 ShieldDome 服务端，并确认终端浏览器能够访问其 HTTPS 域名或服务器地址。
+1. 先启动 ShieldDome 服务端，并确认终端浏览器能够访问其 HTTPS 或 HTTP 域名/服务器地址。
 2. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`。
 3. 开启右上角“开发者模式”。
 4. 点击“加载已解压的扩展程序”。

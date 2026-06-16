@@ -71,9 +71,9 @@
       name: "chinaccs-webmail",
       hosts: ["webmail.chinaccs.cn"],
       detail: (text) => /readMail\.do|messageid=/i.test(location.href) || /发件人|收件人|主题|From|To|Subject/.test(text),
-      subject: ["#subject", ".subject", "[name='subject']", "[class*='subject' i]"],
-      sender: ["[email]", "[data-email]", ".sender", ".from", "[class*='from' i]"],
-      body: ["#mailContent", "#content", ".mail-content", ".mailBody", "[class*='mail' i]", "iframe"],
+      subject: ["#subject", ".subject", "[name='subject']", "b", "strong"],
+      sender: ["[email]", "[data-email]", ".sender", ".from"],
+      body: ["#mailContent", "#content", ".mail-content", ".mailBody", "td", "iframe"],
     },
   ];
 
@@ -134,7 +134,16 @@
 
   function messageRoots(adapter, text) {
     const selectors = [...(adapter ? adapter.body : []), ...COMMON_BODY_SELECTORS];
-    const roots = queryAll(selectors).filter((node) => visibleText(node).length >= MIN_BODY_LENGTH);
+    let roots = queryAll(selectors).filter((node) => visibleText(node).length >= MIN_BODY_LENGTH);
+    if (adapter?.name === "chinaccs-webmail") {
+      roots = roots
+        .filter((node) => {
+          const value = visibleText(node);
+          return /发件人|收件人|主题|From|To|Subject|附件|时间/.test(value) || value.length >= 80;
+        })
+        .sort((left, right) => visibleText(right).length - visibleText(left).length)
+        .slice(0, 3);
+    }
     if (roots.length) return Array.from(new Set(roots));
     return text.length >= MIN_BODY_LENGTH ? documents().map((doc) => doc.body).filter(Boolean) : [];
   }
@@ -176,7 +185,12 @@
   function extractPayload(adapter, text) {
     const roots = messageRoots(adapter, text);
     const anchors = roots.flatMap((root) => Array.from(root.querySelectorAll("a[href]")));
-    const bodyText = roots.map((root) => visibleText(root)).filter(Boolean).join("\n").slice(0, 12000);
+    const bodyParts = [];
+    for (const root of roots) {
+      const value = visibleText(root);
+      if (value && !bodyParts.includes(value)) bodyParts.push(value);
+    }
+    const bodyText = (bodyParts.join("\n") || text).slice(0, 12000);
     const links = Array.from(new Set(anchors)).slice(0, 50).map((anchor) => {
       const context = contextAround(anchor);
       return {

@@ -71,13 +71,27 @@ class EnterpriseService:
         }
 
     def ingest_browser_probe(self, payload: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+        links = []
+        if isinstance(payload.get("links"), list):
+            for item in payload.get("links") or []:
+                if not isinstance(item, dict):
+                    continue
+                links.append(
+                    {
+                        "display_text": str(item.get("display_text") or "")[:500],
+                        "href": str(item.get("href") or item.get("url") or "")[:2000],
+                        "context_before": str(item.get("context_before") or "")[-120:],
+                        "context_after": str(item.get("context_after") or "")[:120],
+                        "html_snippet": str(item.get("html_snippet") or "")[:300],
+                    }
+                )
         parsed = {
             "subject": str(payload.get("subject") or "")[:300],
             "sender": str(payload.get("sender") or "")[:500],
             "recipient": str(payload.get("recipient") or "")[:1000],
             "body_text": str(payload.get("body_text") or "")[:12000],
             "body_summary": str(payload.get("body_summary") or "")[:1000],
-            "links": payload.get("links") if isinstance(payload.get("links"), list) else [],
+            "links": links[:50],
             "attachments": [],
             "authentication": {},
             "message_id": str(payload.get("message_id") or "")[:500],

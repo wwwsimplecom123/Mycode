@@ -259,7 +259,18 @@ def browser_probe_quick(
         raise HTTPException(status_code=413, detail="插件提交内容过大")
     if len(str(payload.get("body_text") or "").encode("utf-8")) > 12000 * 4:
         raise HTTPException(status_code=413, detail="邮件正文超出插件检测限制")
-    result = SERVICE.ingest_browser_probe(payload, actor)
+    try:
+        result = SERVICE.ingest_browser_probe(payload, actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        SERVICE.db.record_audit(
+            str(actor.get("username") or "browser-probe"),
+            "browser_probe.failed",
+            "quick",
+            {"error": str(exc)[:500], "mail_client": str(payload.get("mail_client") or "")[:200]},
+        )
+        raise HTTPException(status_code=400, detail=f"插件提交内容无法解析：{str(exc)[:200]}") from exc
     message_id = str(payload.get("message_id") or "")
     SERVICE.db.record_audit(
         str(actor["username"]),

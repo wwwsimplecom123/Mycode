@@ -20,6 +20,7 @@ class Settings:
     data_encryption_key: str = os.getenv("SHIELDDOME_DATA_ENCRYPTION_KEY", "")
     worker_poll_seconds: float = float(os.getenv("SHIELDDOME_WORKER_POLL_SECONDS", "1"))
     worker_max_attempts: int = int(os.getenv("SHIELDDOME_WORKER_MAX_ATTEMPTS", "3"))
+    worker_stale_after_seconds: int = int(os.getenv("SHIELDDOME_WORKER_STALE_AFTER_SECONDS", "1800"))
     bootstrap_admin_password: str = os.getenv("SHIELDDOME_BOOTSTRAP_ADMIN_PASSWORD", "ChangeMe-Before-Production")
     bootstrap_admin_username: str = os.getenv("SHIELDDOME_BOOTSTRAP_ADMIN_USERNAME", "admin")
     api_token_ttl_hours: int = int(os.getenv("SHIELDDOME_API_TOKEN_TTL_HOURS", "12"))

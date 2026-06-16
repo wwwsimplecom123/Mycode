@@ -1,7 +1,10 @@
 import tempfile
 import unittest
+from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.api import check_rate_limit
 from shielddome.enterprise import EnterpriseService
 from shielddome.analyzer import AnalyzerService
 from shielddome.mail_parser import parse_eml
@@ -158,6 +161,33 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(queued["quick_result"]["evidence"]["policy_summary"]["risk_thresholds"]["medium"], 40)
         self.assertEqual(self.db.get_policy("trusted_ip_ranges"), [])
 
+    def test_trusted_domain_policy_can_disable_subdomain_inheritance(self):
+        policy = self.service.detection_policy()
+        policy.update(
+            {
+                "trusted_domains": ["partner.example"],
+                "trusted_include_subdomains": False,
+                "trusted_ip_ranges": [],
+                "blacklisted_domains": [],
+                "high_risk_keywords": ["password"],
+                "risk_thresholds": {"medium": 35, "high": 65, "critical": 85},
+            }
+        )
+        self.service.configure_detection_policy(policy)
+        queued = self.service.ingest_browser_probe(
+            {
+                "subject": "Password notice",
+                "sender": "notice@sub.partner.example",
+                "body_text": "Please check password at https://sub.partner.example/reset",
+                "links": [{"href": "https://sub.partner.example/reset", "display_text": "reset"}],
+            },
+            {"id": "actor-1", "username": "actor", "display_name": "Actor", "role": "analyst"},
+        )
+
+        links = queued["quick_result"]["evidence"]["links"]
+        self.assertFalse(links[0]["trusted_href"])
+        self.assertIn("external_link", queued["quick_result"]["matched_rules"])
+
     def test_detection_policy_validates_ip_ranges_and_threshold_order(self):
         policy = self.service.detection_policy()
         policy["trusted_ip_ranges"] = ["10.24.0.0/not-a-prefix"]
@@ -179,6 +209,37 @@ class EnterpriseTests(unittest.TestCase):
         self.assertIn(stored["status"], {"completed", "degraded"})
         self.assertIn(stored["risk_level"], {"high", "critical"})
         self.assertEqual(stored["result"]["authentication"]["dmarc"], "pass")
+
+    def test_stale_running_task_is_recovered(self):
+        queued = self.service.ingest_eml("internal-phish.eml", SAMPLE_EML)
+        task = self.db.claim_task("stale-worker")
+        old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        self.db._execute_direct("UPDATE tasks SET updated_at = ? WHERE id = ?", [old, task["id"]])
+
+        recovered = self.service.recover_stale_tasks(1800)
+        stored = self.db.get_analysis(queued["analysis_id"])
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(stored["status"], "queued")
+
+    def test_failed_analysis_can_be_retried(self):
+        queued = self.service.ingest_eml("internal-phish.eml", SAMPLE_EML)
+        task = self.db.claim_task("failed-worker")
+        self.db.fail_task({"id": task["id"], "analysis_id": task["analysis_id"], "attempts": 2}, "boom", 3)
+
+        result = self.service.retry_analysis(queued["analysis_id"], "admin")
+        stats = self.db.queue_stats()
+
+        self.assertEqual(result["status"], "queued")
+        self.assertGreaterEqual(stats["queued"], 1)
+
+    def test_worker_heartbeat_is_recorded_in_system_status(self):
+        self.db.record_worker_heartbeat("worker-a")
+        self.db.record_worker_heartbeat("worker-a")
+        status = self.service.system_status()
+
+        self.assertEqual(status["workers"][0]["worker_id"], "worker-a")
+        self.assertIn("queue", status)
 
     def test_external_model_and_embedding_inputs_are_sanitized(self):
         provider = RecordingProvider()
@@ -217,6 +278,16 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(self.service.search_knowledge("password reset"), [])
         self.service.approve_knowledge(item["id"])
         self.assertEqual(self.service.search_knowledge("password reset")[0]["title"], "OA phishing")
+
+    def test_feedback_creates_pending_review_knowledge_without_raw_body_in_audit(self):
+        queued = self.service.ingest_eml("internal-phish.eml", SAMPLE_EML)
+        result = self.service.feedback(queued["analysis_id"], "confirmed_phishing", "Confirmed by analyst")
+
+        self.assertEqual(result["knowledge_promotion"], "pending_review")
+        item = next(item for item in self.db.list_knowledge() if item["id"] == result["knowledge_id"])
+        self.assertEqual(item["status"], "pending")
+        self.assertEqual(item["source_type"], "phishing_case")
+        self.assertNotIn("evil-login.com/reset", str(self.db.list_audit()))
 
     def test_local_admin_login_creates_revocable_session(self):
         login = self.service.auth.login("admin", "ChangeMe-Before-Production")
@@ -427,6 +498,13 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(result["risk_level"], "medium")
         self.assertEqual(result["risk_score"], 64)
         self.assertIn("high_risk_requires_strong_deterministic_evidence", result["calibration"]["notes"])
+
+    def test_memory_rate_limiter_blocks_after_limit(self):
+        bucket = defaultdict(deque)
+
+        self.assertTrue(check_rate_limit(bucket, "login:user", 2, 60))
+        self.assertTrue(check_rate_limit(bucket, "login:user", 2, 60))
+        self.assertFalse(check_rate_limit(bucket, "login:user", 2, 60))
 
 
 if __name__ == "__main__":

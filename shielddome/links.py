@@ -42,10 +42,12 @@ def normalize_domain(value: str | None) -> str:
         return host
 
 
-def is_trusted_domain(domain: str, trusted_roots: set[str] | None = None) -> bool:
+def is_trusted_domain(domain: str, trusted_roots: set[str] | None = None, include_subdomains: bool = True) -> bool:
     trusted_roots = TRUSTED_ROOT_DOMAINS if trusted_roots is None else trusted_roots
     normalized = normalize_domain(domain)
-    return any(normalized == root or normalized.endswith(f".{root}") for root in trusted_roots)
+    if include_subdomains:
+        return any(normalized == root or normalized.endswith(f".{root}") for root in trusted_roots)
+    return normalized in trusted_roots
 
 
 def is_internal_network_host(domain: str, trusted_ip_ranges: list[str] | set[str] | None = None) -> bool:
@@ -98,6 +100,7 @@ def structuralize_link(
     link: dict[str, Any],
     trusted_roots: set[str] | None = None,
     trusted_ip_ranges: list[str] | set[str] | None = None,
+    trusted_include_subdomains: bool = True,
 ) -> dict[str, Any]:
     display_text = str(link.get("display_text") or link.get("text") or "").strip()
     href = str(link.get("href") or link.get("url") or "").strip()
@@ -117,7 +120,7 @@ def structuralize_link(
         "context_before": context_before,
         "context_after": context_after,
         "display_href_mismatch": mismatch,
-        "trusted_href": is_trusted_domain(href_domain, trusted_roots) or internal_network,
+        "trusted_href": is_trusted_domain(href_domain, trusted_roots, trusted_include_subdomains) or internal_network,
         "is_web_link": is_web_link,
         "internal_network": internal_network,
         "html_snippet": str(link.get("html_snippet") or "")[:300],
@@ -128,5 +131,6 @@ def structuralize_links(
     links: list[dict[str, Any]] | None,
     trusted_roots: set[str] | None = None,
     trusted_ip_ranges: list[str] | set[str] | None = None,
+    trusted_include_subdomains: bool = True,
 ) -> list[dict[str, Any]]:
-    return [structuralize_link(link, trusted_roots, trusted_ip_ranges) for link in links or []]
+    return [structuralize_link(link, trusted_roots, trusted_ip_ranges, trusted_include_subdomains) for link in links or []]

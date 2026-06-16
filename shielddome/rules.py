@@ -37,6 +37,7 @@ def analyze_quick(
     if "trusted_domains" in policy:
         trusted_domains = {str(value).lower() for value in policy["trusted_domains"]}
     trusted_ip_ranges = {str(value) for value in policy.get("trusted_ip_ranges", [])}
+    trusted_include_subdomains = bool(policy.get("trusted_include_subdomains", True))
     blacklisted_domains = (
         {str(value).lower() for value in policy["blacklisted_domains"]}
         if "blacklisted_domains" in policy
@@ -55,6 +56,7 @@ def analyze_quick(
         payload.get("links") or payload.get("links_structural") or [],
         trusted_domains,
         trusted_ip_ranges,
+        trusted_include_subdomains,
     )
     sender_domain = normalize_domain(sender)
     text_blob = " ".join(
@@ -102,10 +104,10 @@ def analyze_quick(
     if high_risk_intent and external_links:
         add_score("internal_intent_external_link", 15)
 
-    if mismatched_links and any(is_trusted_domain(link.get("display_domain", ""), trusted_domains) for link in mismatched_links):
+    if mismatched_links and any(is_trusted_domain(link.get("display_domain", ""), trusted_domains, trusted_include_subdomains) for link in mismatched_links):
         add_score("trusted_display_external_href", 25)
 
-    if sender_domain and not is_trusted_domain(sender_domain, trusted_domains) and high_risk_intent:
+    if sender_domain and not is_trusted_domain(sender_domain, trusted_domains, trusted_include_subdomains) and high_risk_intent:
         add_score("external_sender_high_risk_intent", 5)
 
     score = min(score, 100)
@@ -137,6 +139,7 @@ def analyze_quick(
             "score_breakdown": score_breakdown,
             "policy_summary": {
                 "trusted_domains": len(trusted_domains or []),
+                "trusted_include_subdomains": trusted_include_subdomains,
                 "trusted_ip_ranges": len(trusted_ip_ranges),
                 "blacklisted_domains": len(blacklisted_domains),
                 "high_risk_keywords": len(high_risk_keywords),

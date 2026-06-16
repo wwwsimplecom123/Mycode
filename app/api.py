@@ -7,7 +7,9 @@ import hashlib
 import json
 import os
 import sys
+import time
 import zipfile
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -30,6 +32,11 @@ WEB_ROOT = ROOT / "web"
 EXTENSION_ROOT = ROOT / "extension"
 ADMIN_TOKEN = os.getenv("SHIELDDOME_ADMIN_TOKEN", "")
 INGEST_TOKEN = os.getenv("SHIELDDOME_INGEST_TOKEN", ADMIN_TOKEN)
+LOGIN_RATE_LIMIT: dict[str, deque[float]] = defaultdict(deque)
+PLUGIN_RATE_LIMIT: dict[str, deque[float]] = defaultdict(deque)
+LOGIN_LIMIT = (10, 15 * 60)
+PLUGIN_LIMIT = (120, 60)
+PLUGIN_MAX_BODY_BYTES = 256 * 1024
 
 
 app = FastAPI(
@@ -75,6 +82,7 @@ class DetectionPolicyRequest(BaseModel):
     blacklisted_domains: list[str]
     high_risk_keywords: list[str]
     risk_thresholds: dict[str, int]
+    trusted_include_subdomains: bool = True
 
 
 class ProviderRequest(BaseModel):
@@ -117,6 +125,22 @@ def session_token(authorization: str, cookie_token: str) -> str:
     return bearer_token(authorization) or cookie_token
 
 
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    return forwarded or (request.client.host if request.client else "unknown")
+
+
+def check_rate_limit(bucket: dict[str, deque[float]], key: str, limit: int, window_seconds: int) -> bool:
+    now = time.monotonic()
+    events = bucket[key]
+    while events and now - events[0] > window_seconds:
+        events.popleft()
+    if len(events) >= limit:
+        return False
+    events.append(now)
+    return True
+
+
 def require_admin(
     authorization: str = Header(default=""),
     x_api_key: str = Header(default=""),
@@ -156,6 +180,10 @@ def require_ingest(
 
 
 def require_browser_probe(x_shielddome_plugin_token: str = Header(default="")) -> dict[str, Any]:
+    if x_shielddome_plugin_token:
+        token_key = hashlib.sha256(x_shielddome_plugin_token.encode("utf-8")).hexdigest()[:16]
+        if not check_rate_limit(PLUGIN_RATE_LIMIT, token_key, *PLUGIN_LIMIT):
+            raise HTTPException(status_code=429, detail="插件请求过于频繁，请稍后重试")
     user = SERVICE.auth.authenticate_plugin_token(x_shielddome_plugin_token)
     if not user:
         raise HTTPException(status_code=401, detail="请配置有效的用户插件 Token")
@@ -179,6 +207,9 @@ def health() -> dict[str, Any]:
 
 @app.post("/api/v1/auth/login")
 def login(request: LoginRequest, response: Response, http_request: Request) -> dict[str, Any]:
+    key = f"{client_ip(http_request)}:{request.username.strip().lower()}"
+    if not check_rate_limit(LOGIN_RATE_LIMIT, key, *LOGIN_LIMIT):
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
     try:
         result = SERVICE.auth.login(request.username, request.password)
         response.set_cookie(
@@ -217,8 +248,17 @@ def logout(
 
 
 @app.post("/api/email/analyze/quick")
-def browser_probe_quick(payload: dict[str, Any], actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
+def browser_probe_quick(
+    payload: dict[str, Any],
+    request: Request,
+    actor: dict[str, Any] = Depends(require_browser_probe),
+) -> dict[str, Any]:
     """Compatibility endpoint used by the downloadable browser probe."""
+    content_length = int(request.headers.get("content-length") or 0)
+    if content_length > PLUGIN_MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="插件提交内容过大")
+    if len(str(payload.get("body_text") or "").encode("utf-8")) > 12000 * 4:
+        raise HTTPException(status_code=413, detail="邮件正文超出插件检测限制")
     result = SERVICE.ingest_browser_probe(payload, actor)
     message_id = str(payload.get("message_id") or "")
     SERVICE.db.record_audit(
@@ -296,6 +336,14 @@ def get_analysis(analysis_id: str, _actor: str = Depends(require_console)) -> di
     if not item:
         raise HTTPException(status_code=404, detail="Analysis not found")
     return item
+
+
+@app.post("/api/v1/analyses/{analysis_id}/retry")
+def retry_analysis(analysis_id: str, actor: str = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return SERVICE.retry_analysis(analysis_id, actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/analyses/{analysis_id}/feedback")
@@ -424,6 +472,11 @@ def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_a
 @app.get("/api/v1/audit", dependencies=[Depends(require_console)])
 def audit(limit: int = 200) -> dict[str, Any]:
     return {"items": SERVICE.db.list_audit(limit)}
+
+
+@app.get("/api/v1/system/status", dependencies=[Depends(require_console)])
+def system_status() -> dict[str, Any]:
+    return SERVICE.system_status()
 
 
 @app.get("/api/v1/users", dependencies=[Depends(require_admin)])

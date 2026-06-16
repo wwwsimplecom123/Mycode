@@ -19,7 +19,13 @@ def run() -> None:
     service = EnterpriseService()
     worker_id = f"{socket.gethostname()}-{id(service)}"
     print(f"ShieldDome worker started: {worker_id}")
+    last_recovery = 0.0
     while True:
+        service.db.record_worker_heartbeat(worker_id)
+        now = time.time()
+        if now - last_recovery >= 60:
+            service.recover_stale_tasks(SETTINGS.worker_stale_after_seconds)
+            last_recovery = now
         task = service.db.claim_task(worker_id)
         if not task:
             time.sleep(SETTINGS.worker_poll_seconds)

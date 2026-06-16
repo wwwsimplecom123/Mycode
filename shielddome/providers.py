@@ -129,6 +129,7 @@ class SiliconFlowProvider:
         except Exception as exc:  # external API errors must degrade, not strand tasks
             return {
                 "status": "failed",
+                "error_type": self._error_type(exc),
                 "risk_delta": 0,
                 "signals": [],
                 "reason": f"LLM API 调用失败，已降级：{self._friendly_error(exc)}",
@@ -143,7 +144,7 @@ class SiliconFlowProvider:
             ordered = sorted(response.get("data") or [], key=lambda item: item.get("index", 0))
             return {"status": "completed", "vectors": [item["embedding"] for item in ordered]}
         except Exception as exc:
-            return {"status": "failed", "vectors": [], "error": self._friendly_error(exc)}
+            return {"status": "failed", "vectors": [], "error_type": self._error_type(exc), "error": self._friendly_error(exc)}
 
     def test_connections(self) -> dict[str, Any]:
         if not self.api_key:
@@ -204,6 +205,19 @@ class SiliconFlowProvider:
         if "timed out" in lowered or "timeout" in lowered:
             return "读取响应超时；请提高超时设置，或选择响应更快的 Chat 模型"
         return message
+
+    @staticmethod
+    def _error_type(exc: Exception) -> str:
+        message = str(exc).lower()
+        if "timed out" in message or "timeout" in message:
+            return "timeout"
+        if "json" in message or "可解析" in message:
+            return "json_parse"
+        if "http " in message:
+            return "http_error"
+        if "urlopen" in message or "network" in message or "connection" in message:
+            return "network"
+        return "unknown"
 
     @staticmethod
     def _json_mode_unsupported(exc: Exception) -> bool:

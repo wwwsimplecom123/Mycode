@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ShieldDome 企业邮件安全探针",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "连接 ShieldDome 企业平台的浏览器邮件风险探针",
   "permissions": ["storage"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
@@ -17,7 +17,17 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "https://mail.qq.com/*",
+        "https://exmail.qq.com/*",
+        "https://mail.163.com/*",
+        "https://mail.126.com/*",
+        "https://qiye.163.com/*",
+        "https://outlook.live.com/*",
+        "https://outlook.office.com/*",
+        "https://outlook.office365.com/*",
+        "https://mail.google.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

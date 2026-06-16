@@ -9,6 +9,7 @@ const knowledge = ref([]);
 const users = ref([]);
 const auditLogs = ref([]);
 const applications = ref([]);
+const systemStatus = ref({ queue: {}, workers: [], provider: {}, database: {}, storage: {}, service: {} });
 const selected = ref(null);
 const eventFilter = ref({ type: "all", value: "", label: "全部邮件事件" });
 const busy = ref(false);
@@ -20,11 +21,11 @@ const providers = ref({ chat_endpoint: "", chat_model: "", embedding_endpoint: "
 const providerKey = ref("");
 const providerMessage = ref("");
 const providerBusy = ref(false);
-const detectionPolicy = ref({ trusted_domains: [], trusted_ip_ranges: [], blacklisted_domains: [], high_risk_keywords: [], risk_thresholds: { medium: 35, high: 65, critical: 85 } });
-const policyForm = ref({ trusted_domains: "", trusted_ip_ranges: "", blacklisted_domains: "", high_risk_keywords: "", medium: 35, high: 65, critical: 85 });
+const detectionPolicy = ref({ trusted_domains: [], trusted_ip_ranges: [], blacklisted_domains: [], high_risk_keywords: [], risk_thresholds: { medium: 35, high: 65, critical: 85 }, trusted_include_subdomains: true });
+const policyForm = ref({ trusted_domains: "", trusted_ip_ranges: "", blacklisted_domains: "", high_risk_keywords: "", medium: 35, high: 65, critical: 85, trusted_include_subdomains: true });
 const policyMessage = ref("");
 const policyBusy = ref(false);
-const token = ref(sessionStorage.getItem("shielddome-session") || "");
+const token = ref("");
 const user = ref(null);
 const loginForm = ref({ username: "admin", password: "" });
 const loginError = ref("");
@@ -108,7 +109,6 @@ async function login() {
     });
     token.value = "";
     user.value = result.user;
-    sessionStorage.removeItem("shielddome-session");
     await refresh();
     startAutoRefresh();
   } catch (error) {
@@ -126,7 +126,6 @@ async function logout() {
 function clearSession() {
   token.value = "";
   user.value = null;
-  sessionStorage.removeItem("shielddome-session");
   stopAutoRefresh();
 }
 
@@ -139,8 +138,9 @@ async function refresh() {
     api("/api/v1/settings/providers"),
     api("/api/v1/apps").then((x) => x.items),
     api("/api/v1/audit").then((x) => x.items),
+    api("/api/v1/system/status"),
   ]);
-  const targets = [dashboard, analyses, knowledge, providers, applications, auditLogs];
+  const targets = [dashboard, analyses, knowledge, providers, applications, auditLogs, systemStatus];
   results.forEach((result, index) => {
     if (result.status === "fulfilled") targets[index].value = result.value;
   });
@@ -259,6 +259,55 @@ async function openAnalysis(item) {
   selected.value = await api(`/api/v1/analyses/${item.id}`);
 }
 
+function evidenceSource() {
+  return selected.value?.result || selected.value?.quick_result || {};
+}
+
+function evidenceLinks() {
+  return evidenceSource().quick_result?.evidence?.links || evidenceSource().evidence?.links || [];
+}
+
+function evidenceRules() {
+  return evidenceSource().quick_result?.matched_rules || evidenceSource().matched_rules || [];
+}
+
+async function retrySelectedAnalysis() {
+  if (!selected.value?.id) return;
+  const analysisId = selected.value.id;
+  try {
+    await api(`/api/v1/analyses/${analysisId}/retry`, { method: "POST" });
+    actionMessage.value = "已重新加入深度分析队列。";
+    await refresh();
+    selected.value = await api(`/api/v1/analyses/${analysisId}`);
+  } catch (error) {
+    actionMessage.value = `重试失败：${readError(error)}`;
+  }
+}
+
+async function submitFeedback(verdict) {
+  if (!selected.value?.id) return;
+  const comment = window.prompt("请输入简短说明，系统会创建待审核知识用于后续闭环。") || "";
+  try {
+    const result = await api(`/api/v1/analyses/${selected.value.id}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verdict, comment }),
+    });
+    actionMessage.value = result.knowledge_id ? "反馈已记录，并已生成待审核知识。" : "反馈已记录。";
+    await refresh();
+  } catch (error) {
+    actionMessage.value = `反馈失败：${readError(error)}`;
+  }
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (size >= 1024 * 1024 * 1024) return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${size} B`;
+}
+
 async function approve(item) {
   await api(`/api/v1/knowledge/${item.id}/approve`, { method: "POST" });
   await refresh();
@@ -274,6 +323,7 @@ function setPolicyForm(policy) {
     medium: policy.risk_thresholds?.medium ?? 35,
     high: policy.risk_thresholds?.high ?? 65,
     critical: policy.risk_thresholds?.critical ?? 85,
+    trusted_include_subdomains: policy.trusted_include_subdomains !== false,
   };
 }
 
@@ -293,6 +343,7 @@ async function saveDetectionPolicy() {
         trusted_ip_ranges: policyLines(policyForm.value.trusted_ip_ranges),
         blacklisted_domains: policyLines(policyForm.value.blacklisted_domains),
         high_risk_keywords: policyLines(policyForm.value.high_risk_keywords),
+        trusted_include_subdomains: Boolean(policyForm.value.trusted_include_subdomains),
         risk_thresholds: {
           medium: Number(policyForm.value.medium),
           high: Number(policyForm.value.high),
@@ -604,7 +655,7 @@ onBeforeUnmount(() => {
           <article class="panel upload"><h2>上传 EML 文件检测</h2><p>邮件将进入规则、RAG 与 LLM 分析链路，原文件默认保存 72 小时。</p><label :class="['drop',{dragging:isDraggingEml,busy}]" @dragenter.prevent="enterEmlDropZone" @dragover.prevent="dragEmlOver" @dragleave.prevent="leaveEmlDropZone" @drop.prevent.stop="dropEml"><input type="file" accept=".eml,message/rfc822" @change="uploadEml" :disabled="busy"><b>{{ busy ? '正在提交并开始检测...' : isDraggingEml ? '松开鼠标立即开始检测' : '点击选择或拖拽 .eml 文件' }}</b><span :class="{error:uploadMessage.startsWith('提交失败') || uploadMessage.startsWith('仅支持') || uploadMessage.startsWith('文件超过') || uploadMessage.startsWith('未检测到')}">{{ uploadMessage || '最大 50 MB，拖放后自动开始检测' }}</span></label></article>
         </template>
         <template v-else-if="view==='events' || view==='internal'">
-          <div class="grid events"><article class="panel"><div class="event-heading"><div><h3>{{ eventFilter.label }}</h3><small>共 {{ filteredAnalyses.length }} 条结果</small></div><button v-if="eventFilter.type!=='all'" @click="clearEventFilter">清除筛选</button></div><table><thead><tr><th>时间</th><th>来源</th><th>状态</th><th>风险</th></tr></thead><tbody><tr v-for="item in filteredAnalyses" :key="item.id" @click="openAnalysis(item)"><td>{{ item.created_at?.slice(0,19) }}</td><td>{{ item.source_name }}</td><td>{{ label(item.status) }}</td><td><span :class="'tag '+item.risk_level">{{ label(item.risk_level) }}</span></td></tr><tr v-if="!filteredAnalyses.length"><td colspan="4" class="empty-row">当前筛选条件下暂无事件</td></tr></tbody></table></article><article class="panel detail"><h3>检测详情</h3><pre>{{ JSON.stringify(selected || {}, null, 2) }}</pre></article></div>
+          <div class="grid events"><article class="panel"><div class="event-heading"><div><h3>{{ eventFilter.label }}</h3><small>共 {{ filteredAnalyses.length }} 条结果</small></div><button v-if="eventFilter.type!=='all'" @click="clearEventFilter">清除筛选</button></div><table><thead><tr><th>时间</th><th>来源</th><th>状态</th><th>风险</th></tr></thead><tbody><tr v-for="item in filteredAnalyses" :key="item.id" @click="openAnalysis(item)"><td>{{ item.created_at?.slice(0,19) }}</td><td>{{ item.source_name }}</td><td>{{ label(item.status) }}</td><td><span :class="'tag '+item.risk_level">{{ label(item.risk_level) }}</span></td></tr><tr v-if="!filteredAnalyses.length"><td colspan="4" class="empty-row">当前筛选条件下暂无事件</td></tr></tbody></table></article><article class="panel detail"><div class="title-row"><div><h3>检测详情</h3><small>{{ selected?.id || '请选择左侧事件' }}</small></div><button v-if="selected && ['failed','degraded'].includes(selected.status)" @click="retrySelectedAnalysis">重新分析</button></div><p v-if="actionMessage" class="action-message">{{ actionMessage }}</p><template v-if="selected"><div class="detail-summary"><span :class="'tag '+selected.risk_level">{{ label(selected.risk_level) }}</span><b>{{ label(selected.status) }}</b><small>{{ selected.source_name }}</small></div><section class="evidence-block"><h4>判定依据</h4><p>{{ evidenceSource().reason || selected.quick_result?.reason || '暂无解释' }}</p><div class="evidence-grid"><div><b>命中规则</b><code>{{ evidenceRules().join(', ') || '-' }}</code></div><div><b>认证结果</b><code>{{ JSON.stringify(evidenceSource().authentication || selected.parsed_message?.authentication || {}) }}</code></div><div><b>模型状态</b><code>{{ evidenceSource().llm?.status || '-' }} {{ evidenceSource().llm?.error_type || '' }}</code></div><div><b>RAG 引用</b><code>{{ evidenceSource().rag?.references?.length || 0 }} 条</code></div></div><h4>链接风险</h4><table><thead><tr><th>显示域名</th><th>真实域名</th><th>错配</th><th>可信</th></tr></thead><tbody><tr v-for="(link,index) in evidenceLinks().slice(0,8)" :key="index"><td>{{ link.display_domain || '-' }}</td><td>{{ link.href_domain || '-' }}</td><td>{{ link.display_href_mismatch ? '是' : '否' }}</td><td>{{ link.trusted_href ? '是' : '否' }}</td></tr><tr v-if="!evidenceLinks().length"><td colspan="4" class="empty-row">暂无链接证据</td></tr></tbody></table><div class="settings-actions"><button @click="submitFeedback('false_positive')">标记误报</button><button @click="submitFeedback('confirmed_phishing')">确认钓鱼</button><button @click="submitFeedback('uncertain')">标记不确定</button></div></section><details><summary>原始 JSON</summary><pre>{{ JSON.stringify(selected || {}, null, 2) }}</pre></details></template><p v-else class="empty-row">请选择一条邮件事件查看详情</p></article></div>
         </template>
         <template v-else-if="view==='knowledge'">
           <article class="panel"><div class="title-row"><div><h2>RAG 知识库</h2><p>知识审核后才参与正式检测。</p></div><div class="import-tools"><select v-model="knowledgeType"><option value="phishing_case">钓鱼案例</option><option value="trusted_email">可信邮件</option><option value="security_rule">安全规则</option><option value="soc_review">SOC 结论</option></select><label class="primary">导入知识<input type="file" accept=".eml,.txt,.md,.csv,.pdf" @change="uploadKnowledge"></label></div></div><table><thead><tr><th>标题</th><th>类型</th><th>状态</th><th>版本</th><th>操作</th></tr></thead><tbody><tr v-for="item in knowledge" :key="item.id"><td>{{ item.title }}</td><td>{{ label(item.source_type) }}</td><td>{{ label(item.status) }}</td><td>v{{ item.version }}</td><td><button @click="approve(item)" :disabled="item.status==='published'">发布</button></td></tr></tbody></table></article>
@@ -618,8 +669,9 @@ onBeforeUnmount(() => {
             <p v-if="policyMessage" class="action-message">{{ policyMessage }}</p>
             <div class="policy-grid">
               <article class="panel policy-card">
-                <h3>可信域名</h3><p>每行一个根域名。其子域名也会被视为可信来源和可信链接。</p>
+                <h3>可信域名</h3><p>每行一个根域名。可选择是否让子域继承可信状态。</p>
                 <textarea v-model="policyForm.trusted_domains" rows="9" spellcheck="false" placeholder="company.com&#10;mail.company.com"></textarea>
+                <label class="checkbox-line"><input v-model="policyForm.trusted_include_subdomains" type="checkbox"> 子域名继承可信</label>
                 <small>{{ policyLines(policyForm.trusted_domains).length }} 项</small>
               </article>
               <article class="panel policy-card">
@@ -713,6 +765,14 @@ onBeforeUnmount(() => {
             </div>
             <div class="install-guide"><h3>安装与更新说明</h3><ol><li>下载并解压最新版 ZIP。</li><li>在 Chrome 或 Edge 扩展管理页开启开发者模式。</li><li>选择“加载已解压的扩展程序”，打开解压后的 <code>extension</code> 目录。</li><li>打开插件的“扩展程序选项”，填写 ShieldDome 服务地址并授权连接。</li><li>更新时重新下载最新版并覆盖原目录，然后在扩展管理页点击“重新加载”。</li></ol><p>企业批量部署时，可使用 Chrome/Edge 企业策略配置托管自动更新。</p></div>
           </article>
+        </template>
+        <template v-else-if="view==='system'">
+          <div class="system-grid">
+            <article class="panel"><h2>系统状态</h2><div class="evidence-grid"><div><b>服务</b><code>{{ systemStatus.service?.status || '-' }} v{{ systemStatus.service?.version || '-' }}</code></div><div><b>数据库</b><code>{{ systemStatus.database?.backend || '-' }} / {{ systemStatus.database?.status || '-' }}</code></div><div><b>pgvector</b><code>{{ systemStatus.database?.pgvector_expected ? '生产环境需要' : '本地 SQLite 不需要' }}</code></div><div><b>磁盘可用</b><code>{{ formatBytes(systemStatus.storage?.free_bytes) }} / {{ formatBytes(systemStatus.storage?.total_bytes) }}</code></div></div></article>
+            <article class="panel"><h2>任务队列</h2><div class="stats compact"><article class="stat-card"><small>排队</small><strong>{{ systemStatus.queue?.queued || 0 }}</strong></article><article class="stat-card"><small>运行中</small><strong>{{ systemStatus.queue?.running || 0 }}</strong></article><article class="stat-card"><small>失败</small><strong>{{ systemStatus.queue?.failed || 0 }}</strong></article><article class="stat-card"><small>已完成</small><strong>{{ systemStatus.queue?.completed || 0 }}</strong></article></div></article>
+            <article class="panel"><h2>Worker 心跳</h2><table><thead><tr><th>Worker</th><th>最近心跳</th></tr></thead><tbody><tr v-for="item in systemStatus.workers" :key="item.worker_id"><td>{{ item.worker_id }}</td><td>{{ item.last_seen_at?.slice(0,19).replace('T',' ') }}</td></tr><tr v-if="!systemStatus.workers?.length"><td colspan="2" class="empty-row">暂无 Worker 心跳</td></tr></tbody></table></article>
+            <article class="panel"><h2>模型配置</h2><div class="evidence-grid"><div><b>状态</b><code>{{ systemStatus.provider?.configured ? '已配置' : '未配置' }}</code></div><div><b>Chat</b><code>{{ systemStatus.provider?.chat_model || '-' }}</code></div><div><b>Embedding</b><code>{{ systemStatus.provider?.embedding_model || '-' }}</code></div><div><b>错误</b><code>{{ systemStatus.provider?.configuration_error || '-' }}</code></div></div></article>
+          </div>
         </template>
         <article v-else class="panel"><h2>功能已接入后端 API</h2><p>该管理页面将在后续策略配置与运维数据产生后展示对应内容。</p></article>
       </section>

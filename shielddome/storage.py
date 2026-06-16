@@ -81,6 +81,7 @@ class Database:
             ("blacklisted_domains", sorted(BLACKLISTED_DOMAINS)),
             ("high_risk_keywords", sorted(HIGH_RISK_KEYWORDS)),
             ("risk_thresholds", RISK_THRESHOLDS),
+            ("trusted_include_subdomains", True),
         ]
         with self.connect() as connection:
             for key, value in defaults:
@@ -135,6 +136,46 @@ class Database:
             )
             return task
 
+    def recover_stale_tasks(self, timeout_seconds: int) -> int:
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(60, timeout_seconds))).isoformat()
+        with self.connect() as connection:
+            rows = self._fetchall_on(
+                connection,
+                "SELECT id, analysis_id FROM tasks WHERE status = ? AND updated_at < ?",
+                ["running", cutoff],
+            )
+            for row in rows:
+                self._execute(
+                    connection,
+                    "UPDATE tasks SET status = ?, worker_id = NULL, available_at = ?, updated_at = ? WHERE id = ?",
+                    ["queued", utc_now(), utc_now(), row["id"]],
+                )
+                self._execute(
+                    connection,
+                    "UPDATE analyses SET status = ?, error = ?, updated_at = ? WHERE id = ?",
+                    ["queued", "Recovered stale running task", utc_now(), row["analysis_id"]],
+                )
+        return len(rows)
+
+    def retry_analysis(self, analysis_id: str) -> bool:
+        analysis = self.get_analysis(analysis_id)
+        if not analysis or analysis.get("status") not in {"failed", "degraded"}:
+            return False
+        now = utc_now()
+        with self.connect() as connection:
+            self._insert(
+                connection,
+                "tasks",
+                ["id", "analysis_id", "status", "attempts", "available_at", "created_at", "updated_at"],
+                [str(uuid.uuid4()), analysis_id, "queued", 0, now, now, now],
+            )
+            self._execute(
+                connection,
+                "UPDATE analyses SET status = ?, error = NULL, updated_at = ? WHERE id = ?",
+                ["queued", now, analysis_id],
+            )
+        return True
+
     def complete_task(self, task_id: str, analysis_id: str, result: dict[str, Any], degraded: bool = False) -> None:
         status = "degraded" if degraded else "completed"
         with self.connect() as connection:
@@ -163,6 +204,24 @@ class Database:
                 [analysis_status, error[:1000], utc_now(), task["analysis_id"]],
             )
 
+    def record_worker_heartbeat(self, worker_id: str) -> None:
+        now = utc_now()
+        with self.connect() as connection:
+            existing = self._fetchone_on(connection, "SELECT worker_id FROM worker_heartbeats WHERE worker_id = ?", [worker_id])
+            if existing:
+                self._execute(
+                    connection,
+                    "UPDATE worker_heartbeats SET last_seen_at = ?, updated_at = ? WHERE worker_id = ?",
+                    [now, now, worker_id],
+                )
+            else:
+                self._insert(
+                    connection,
+                    "worker_heartbeats",
+                    ["worker_id", "last_seen_at", "updated_at"],
+                    [worker_id, now, now],
+                )
+
     def get_analysis(self, analysis_id: str) -> dict[str, Any] | None:
         row = self._fetchone("SELECT * FROM analyses WHERE id = ?", [analysis_id])
         return self._decode_analysis(row) if row else None
@@ -184,6 +243,21 @@ class Database:
             "degraded": sum(1 for row in rows if row.get("status") == "degraded"),
             "trend": self._daily_counts(rows),
         }
+
+    def queue_stats(self) -> dict[str, Any]:
+        rows = self._fetchall("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status", [])
+        stats = {str(row.get("status")): int(row.get("count") or 0) for row in rows}
+        return {
+            "queued": stats.get("queued", 0),
+            "running": stats.get("running", 0),
+            "dead": stats.get("dead", 0),
+            "completed": stats.get("completed", 0) + stats.get("degraded", 0),
+            "failed": stats.get("dead", 0),
+            "by_status": stats,
+        }
+
+    def worker_heartbeats(self) -> list[dict[str, Any]]:
+        return self._fetchall("SELECT worker_id, last_seen_at, updated_at FROM worker_heartbeats ORDER BY last_seen_at DESC", [])
 
     def add_knowledge(self, title: str, source_type: str, content: str, generalized: str, metadata: dict[str, Any]) -> str:
         item_id = str(uuid.uuid4())
@@ -426,7 +500,10 @@ class Database:
 
     def _fetchall(self, sql: str, params: list[Any]) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            return [dict(row) for row in self._execute(connection, sql, params).fetchall()]
+            return self._fetchall_on(connection, sql, params)
+
+    def _fetchall_on(self, connection: Any, sql: str, params: list[Any]) -> list[dict[str, Any]]:
+        return [dict(row) for row in self._execute(connection, sql, params).fetchall()]
 
     def _execute_direct(self, sql: str, params: list[Any]) -> None:
         with self.connect() as connection:
@@ -508,6 +585,9 @@ CREATE TABLE IF NOT EXISTS plugin_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_plugin_tokens_hash ON plugin_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_plugin_tokens_user ON plugin_tokens(user_id, revoked);
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  worker_id TEXT PRIMARY KEY, last_seen_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 """
 
 
@@ -552,4 +632,7 @@ CREATE TABLE IF NOT EXISTS plugin_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_plugin_tokens_hash ON plugin_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_plugin_tokens_user ON plugin_tokens(user_id, revoked);
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  worker_id TEXT PRIMARY KEY, last_seen_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+);
 """

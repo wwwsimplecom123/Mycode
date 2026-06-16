@@ -6,6 +6,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -290,6 +291,7 @@ class EnterpriseService:
             "blacklisted_domains": self.db.get_policy("blacklisted_domains", []) or [],
             "high_risk_keywords": self.db.get_policy("high_risk_keywords", []) or [],
             "risk_thresholds": self.db.get_policy("risk_thresholds", {}) or {},
+            "trusted_include_subdomains": self.db.get_policy("trusted_include_subdomains", True),
         }
 
     def configure_detection_policy(self, values: dict[str, Any], actor: str = "admin") -> dict[str, Any]:
@@ -299,6 +301,7 @@ class EnterpriseService:
             "blacklisted_domains": self._validated_domains(values.get("blacklisted_domains"), "黑名单域名"),
             "high_risk_keywords": self._validated_keywords(values.get("high_risk_keywords")),
             "risk_thresholds": self._validated_thresholds(values.get("risk_thresholds")),
+            "trusted_include_subdomains": bool(values.get("trusted_include_subdomains", True)),
         }
         for key, value in policy.items():
             self.db.set_policy(key, value)
@@ -374,10 +377,79 @@ class EnterpriseService:
         return sorted(ranked, key=lambda item: item["score"], reverse=True)[: max(1, min(limit, 20))]
 
     def feedback(self, analysis_id: str, verdict: str, comment: str) -> dict[str, Any]:
-        if not self.db.get_analysis(analysis_id):
+        analysis = self.db.get_analysis(analysis_id)
+        if not analysis:
             raise KeyError(f"Unknown analysis_id: {analysis_id}")
-        self.db.record_audit("soc", "analysis.feedback", analysis_id, {"verdict": verdict, "comment": comment[:1000]})
-        return {"analysis_id": analysis_id, "status": "recorded", "knowledge_promotion": "requires_manual_review"}
+        knowledge_id = ""
+        if verdict in {"false_positive", "confirmed_phishing"}:
+            parsed = analysis.get("parsed_message") or {}
+            quick = analysis.get("quick_result") or {}
+            result = analysis.get("result") or {}
+            source_type = "trusted_email" if verdict == "false_positive" else "phishing_case"
+            content = "\n".join(
+                [
+                    str(parsed.get("subject") or ""),
+                    str(parsed.get("sender") or ""),
+                    str(quick.get("reason") or ""),
+                    str(result.get("reason") or ""),
+                    str(comment or "")[:1000],
+                ]
+            )
+            generalized = generalize_entities(content)["text"]
+            knowledge_id = self.db.add_knowledge(
+                f"SOC feedback {verdict} {analysis_id[:8]}",
+                source_type,
+                content,
+                generalized,
+                {"analysis_id": analysis_id, "verdict": verdict},
+            )
+        self.db.record_audit(
+            "soc",
+            "analysis.feedback",
+            analysis_id,
+            {"verdict": verdict, "comment_len": len(comment or ""), "knowledge_id": knowledge_id},
+        )
+        return {
+            "analysis_id": analysis_id,
+            "status": "recorded",
+            "knowledge_promotion": "pending_review" if knowledge_id else "not_created",
+            "knowledge_id": knowledge_id,
+        }
+
+    def retry_analysis(self, analysis_id: str, actor: str = "admin") -> dict[str, Any]:
+        if not self.db.retry_analysis(analysis_id):
+            raise ValueError("Analysis is not retryable")
+        self.db.record_audit(actor, "analysis.retry_queued", analysis_id)
+        return {"analysis_id": analysis_id, "status": "queued"}
+
+    def recover_stale_tasks(self, timeout_seconds: int = 1800) -> int:
+        return self.db.recover_stale_tasks(timeout_seconds)
+
+    def system_status(self) -> dict[str, Any]:
+        provider = self.provider_config()
+        disk = shutil.disk_usage(SETTINGS.raw_storage_dir)
+        return {
+            "service": {"status": "ok", "version": "2.0.0"},
+            "database": {
+                "status": "ok",
+                "backend": "postgresql" if self.db._is_postgres else "sqlite",
+                "pgvector_expected": bool(self.db._is_postgres),
+            },
+            "queue": self.db.queue_stats(),
+            "workers": self.db.worker_heartbeats(),
+            "provider": {
+                "configured": bool(provider.get("configured")),
+                "chat_model": provider.get("chat_model"),
+                "embedding_model": provider.get("embedding_model"),
+                "secret_source": provider.get("secret_source"),
+                "configuration_error": provider.get("configuration_error") or "",
+            },
+            "storage": {
+                "raw_storage_dir": str(SETTINGS.raw_storage_dir),
+                "free_bytes": disk.free,
+                "total_bytes": disk.total,
+            },
+        }
 
     @staticmethod
     def _add_auth_and_attachment_signals(

@@ -250,6 +250,28 @@ class EnterpriseTests(unittest.TestCase):
         status = probe.status(quick["analysis_id"])
         self.assertIn(status["deep_status"], {"skipped", "pending", "running", "completed"})
 
+    def test_browser_probe_ingest_is_durable_and_updates_dashboard(self):
+        managed = self.service.auth.create_user("probe.durable", "Probe-Password-2026", "Probe Durable", "analyst")
+        before = self.db.dashboard()["total"]
+        queued = self.service.ingest_browser_probe(
+            {
+                "message_id": "browser-message-1",
+                "subject": "Reset password notice",
+                "sender": "security@example.com",
+                "body_text": "Please reset password at https://example.com/reset",
+                "links": [{"href": "https://example.com/reset", "display_text": "reset"}],
+                "mail_client": "browser-extension:webmail.example",
+                "page_url": "https://webmail.example/read?id=secret",
+            },
+            managed,
+        )
+        stored = self.db.get_analysis(queued["analysis_id"])
+
+        self.assertEqual(self.db.dashboard()["total"], before + 1)
+        self.assertEqual(stored["parsed_message"]["submitted_by"]["username"], "probe.durable")
+        self.assertEqual(stored["status"], "queued")
+        self.assertTrue(queued["deep_scan_required"])
+
     def test_user_plugin_token_is_hashed_rotatable_and_revocable(self):
         managed = self.service.auth.create_user("probe.user", "Probe-Password-2026", "Probe User", "analyst")
         issued = self.service.auth.issue_plugin_token(managed["id"])

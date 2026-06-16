@@ -69,6 +69,56 @@ class EnterpriseService:
             "raw_storage_encrypted": self.raw_store.encrypted,
         }
 
+    def ingest_browser_probe(self, payload: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+        parsed = {
+            "subject": str(payload.get("subject") or "")[:300],
+            "sender": str(payload.get("sender") or "")[:500],
+            "recipient": str(payload.get("recipient") or "")[:1000],
+            "body_text": str(payload.get("body_text") or "")[:12000],
+            "body_summary": str(payload.get("body_summary") or "")[:1000],
+            "links": payload.get("links") if isinstance(payload.get("links"), list) else [],
+            "attachments": [],
+            "authentication": {},
+            "message_id": str(payload.get("message_id") or "")[:500],
+            "mail_client": str(payload.get("mail_client") or "")[:200],
+            "page_url": str(payload.get("page_url") or "")[:500],
+            "submitted_by": {
+                "id": str(actor.get("id") or ""),
+                "username": str(actor.get("username") or ""),
+                "display_name": str(actor.get("display_name") or ""),
+                "role": str(actor.get("role") or ""),
+            },
+        }
+        quick_payload = {
+            "subject": parsed["subject"],
+            "sender": parsed["sender"],
+            "body_text": parsed["body_text"],
+            "body_summary": parsed["body_summary"],
+            "links": parsed["links"],
+        }
+        quick = analyze_quick(quick_payload, policy=self.detection_policy())
+        analysis_id = self.db.create_analysis(f"browser:{parsed['mail_client'] or 'unknown'}", "", parsed, quick)
+        self.db.record_audit(
+            parsed["submitted_by"]["username"] or "browser-probe",
+            "browser_probe.queued",
+            analysis_id,
+            {
+                "user_id": parsed["submitted_by"]["id"],
+                "mail_client": parsed["mail_client"],
+                "message_id_sha256": hashlib.sha256(parsed["message_id"].encode("utf-8")).hexdigest() if parsed["message_id"] else "",
+            },
+        )
+        return {
+            "analysis_id": analysis_id,
+            "status": "queued",
+            "risk_level": quick["risk_level"],
+            "action": quick["action"],
+            "reason": quick["reason"],
+            "matched_rules": quick["matched_rules"],
+            "deep_scan_required": True,
+            "quick_result": quick,
+        }
+
     def process_analysis(self, analysis_id: str) -> tuple[dict[str, Any], bool]:
         self._sync_provider_secret()
         analysis = self.db.get_analysis(analysis_id)

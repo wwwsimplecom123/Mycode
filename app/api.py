@@ -22,12 +22,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shielddome.enterprise import EnterpriseService  # noqa: E402
-from shielddome.analyzer import AnalyzerService  # noqa: E402
 from shielddome.settings import SETTINGS  # noqa: E402
 
 
 SERVICE = EnterpriseService()
-PLUGIN_ANALYZER = AnalyzerService(policy_provider=SERVICE.detection_policy)
 WEB_ROOT = ROOT / "web"
 EXTENSION_ROOT = ROOT / "extension"
 ADMIN_TOKEN = os.getenv("SHIELDDOME_ADMIN_TOKEN", "")
@@ -51,7 +49,7 @@ async def browser_probe_cors(request: Request, call_next: Any) -> Response:
     if request.url.path.startswith("/api/email/"):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-ShieldDome-Plugin-Token"
     return response
 
 
@@ -157,12 +155,11 @@ def require_ingest(
     raise HTTPException(status_code=401, detail="请先登录或提供有效的邮件接入 API Key")
 
 
-BROWSER_PROBE_ACTOR = {
-    "id": "browser-probe",
-    "username": "browser-probe",
-    "display_name": "浏览器插件",
-    "role": "probe",
-}
+def require_browser_probe(x_shielddome_plugin_token: str = Header(default="")) -> dict[str, Any]:
+    user = SERVICE.auth.authenticate_plugin_token(x_shielddome_plugin_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="请配置有效的用户插件 Token")
+    return user
 
 
 def safe_probe_page_url(value: Any) -> str:
@@ -220,10 +217,9 @@ def logout(
 
 
 @app.post("/api/email/analyze/quick")
-def browser_probe_quick(payload: dict[str, Any]) -> dict[str, Any]:
+def browser_probe_quick(payload: dict[str, Any], actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
     """Compatibility endpoint used by the downloadable browser probe."""
-    actor = BROWSER_PROBE_ACTOR
-    result = PLUGIN_ANALYZER.quick_analyze(payload, actor=actor)
+    result = SERVICE.ingest_browser_probe(payload, actor)
     message_id = str(payload.get("message_id") or "")
     SERVICE.db.record_audit(
         str(actor["username"]),
@@ -242,16 +238,35 @@ def browser_probe_quick(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/email/auth/me")
-def browser_probe_identity() -> dict[str, Any]:
-    return BROWSER_PROBE_ACTOR
+def browser_probe_identity(actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
+    return actor
 
 
 @app.get("/api/email/analyze/status/{analysis_id}")
-def browser_probe_status(analysis_id: str) -> dict[str, Any]:
-    try:
-        return PLUGIN_ANALYZER.status(analysis_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+def browser_probe_status(analysis_id: str, actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
+    item = SERVICE.db.get_analysis(analysis_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    parsed = item.get("parsed_message") or {}
+    submitted = parsed.get("submitted_by") or {}
+    if str(submitted.get("id") or "") != str(actor["id"]):
+        raise HTTPException(status_code=403, detail="无权查看其他用户提交的插件检测")
+    status = str(item.get("status") or "")
+    deep_status = {
+        "queued": "pending",
+        "running": "running",
+        "completed": "completed",
+        "degraded": "completed",
+        "failed": "failed",
+    }.get(status, status or "pending")
+    return {
+        "analysis_id": analysis_id,
+        "quick_result": item.get("quick_result"),
+        "deep_status": deep_status,
+        "deep_result": item.get("result"),
+        "submitted_by": actor,
+        "error": item.get("error") or "",
+    }
 
 
 @app.get("/api/v1/dashboard", dependencies=[Depends(require_console)])

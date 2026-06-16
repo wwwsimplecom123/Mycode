@@ -246,10 +246,11 @@
     };
   }
 
-  async function apiRequest(apiBase, path, method = "GET", payload) {
+  async function apiRequest(apiBase, pluginToken, path, method = "GET", payload) {
     const response = await chrome.runtime.sendMessage({
       type: "shielddome-api-request",
       apiBase,
+      pluginToken,
       path,
       method,
       payload,
@@ -260,10 +261,10 @@
     return response.data;
   }
 
-  async function analyze(apiBase, text) {
+  async function analyze(apiBase, pluginToken, text) {
     try {
       setBanner("scanning", "盾穹正在检测", "已读取当前邮件，正在进行快速规则初筛");
-      const quick = await apiRequest(apiBase, "/api/email/analyze/quick", "POST", extractPayload(text));
+      const quick = await apiRequest(apiBase, pluginToken, "/api/email/analyze/quick", "POST", extractPayload(text));
       analysisId = quick.analysis_id;
       setBanner(quick.risk_level, `快速检测：${quick.risk_level}`, quick.reason);
       if (quick.deep_scan_required) {
@@ -271,11 +272,14 @@
         pollTimer = setInterval(async () => {
           try {
             attempts += 1;
-            const status = await apiRequest(apiBase, `/api/email/analyze/status/${analysisId}`);
+            const status = await apiRequest(apiBase, pluginToken, `/api/email/analyze/status/${analysisId}`);
             if (status.deep_status === "completed") {
               clearInterval(pollTimer);
               const result = status.deep_result;
               setBanner(result.risk_level, `深度检测：${result.risk_level}`, result.reason);
+            } else if (status.deep_status === "failed") {
+              clearInterval(pollTimer);
+              setBanner("medium", "盾穹深度检测失败", status.error || "请在控制台查看任务错误");
             } else if (attempts >= 60) {
               clearInterval(pollTimer);
               setBanner("medium", "盾穹检测超时", "深度检测超过 60 秒，请在控制台查看任务状态");
@@ -293,12 +297,13 @@
 
   const text = pageText();
   if (!isMessageDetail(text)) return;
-  chrome.storage.local.get(["shielddomeApiBase"], ({ shielddomeApiBase }) => {
+  chrome.storage.local.get(["shielddomeApiBase", "shielddomePluginToken"], ({ shielddomeApiBase, shielddomePluginToken }) => {
     const apiBase = String(shielddomeApiBase || "").trim().replace(/\/+$/, "");
-    if (!apiBase) {
+    const pluginToken = String(shielddomePluginToken || "").trim();
+    if (!apiBase || !pluginToken) {
       setConfigurationBanner();
       return;
     }
-    analyze(apiBase, text);
+    analyze(apiBase, pluginToken, text);
   });
 })();

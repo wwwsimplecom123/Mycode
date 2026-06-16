@@ -35,6 +35,7 @@ const actionMessage = ref("");
 const issuedPluginToken = ref(null);
 const userForm = ref({ username: "", display_name: "", password: "", role: "analyst" });
 const headers = computed(() => (token.value ? { Authorization: `Bearer ${token.value}` } : {}));
+let refreshTimer = null;
 const filteredAnalyses = computed(() => {
   const filter = eventFilter.value;
   if (filter.type === "risk") return analyses.value.filter((item) => item.risk_level === filter.value);
@@ -109,6 +110,7 @@ async function login() {
     user.value = result.user;
     sessionStorage.removeItem("shielddome-session");
     await refresh();
+    startAutoRefresh();
   } catch (error) {
     loginError.value = "登录失败，请检查用户名和密码。";
   } finally {
@@ -125,6 +127,7 @@ function clearSession() {
   token.value = "";
   user.value = null;
   sessionStorage.removeItem("shielddome-session");
+  stopAutoRefresh();
 }
 
 async function refresh() {
@@ -157,6 +160,18 @@ async function refresh() {
   }
   await nextTick();
   renderChart();
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshTimer = window.setInterval(() => {
+    if (user.value) refresh();
+  }, 15000);
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) window.clearInterval(refreshTimer);
+  refreshTimer = null;
 }
 
 function openView(name) {
@@ -531,6 +546,7 @@ onMounted(async () => {
   try {
     user.value = await api("/api/v1/auth/me");
     await refresh();
+    startAutoRefresh();
   } catch {
     clearSession();
   } finally {
@@ -545,7 +561,10 @@ watch(view, async (name) => {
   }
 });
 
-onBeforeUnmount(() => trendChart?.dispose());
+onBeforeUnmount(() => {
+  stopAutoRefresh();
+  trendChart?.dispose();
+});
 </script>
 
 <template>

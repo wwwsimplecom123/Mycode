@@ -67,6 +67,14 @@
       sender: ["[email]", "[data-email]", ".sender", ".from"],
       body: [".mail-content", ".mailBody", "[class*='mailContent' i]", "iframe"],
     },
+    {
+      name: "chinaccs-webmail",
+      hosts: ["webmail.chinaccs.cn"],
+      detail: (text) => /readMail\.do|messageid=/i.test(location.href) || /发件人|收件人|主题|From|To|Subject/.test(text),
+      subject: ["#subject", ".subject", "[name='subject']", "[class*='subject' i]"],
+      sender: ["[email]", "[data-email]", ".sender", ".from", "[class*='from' i]"],
+      body: ["#mailContent", "#content", ".mail-content", ".mailBody", "[class*='mail' i]", "iframe"],
+    },
   ];
 
   let pollTimer = null;

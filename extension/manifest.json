@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ShieldDome 企业邮件安全探针",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "连接 ShieldDome 企业平台的浏览器邮件风险探针",
   "permissions": ["storage"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
@@ -26,7 +26,8 @@
         "https://outlook.live.com/*",
         "https://outlook.office.com/*",
         "https://outlook.office365.com/*",
-        "https://mail.google.com/*"
+        "https://mail.google.com/*",
+        "https://webmail.chinaccs.cn/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

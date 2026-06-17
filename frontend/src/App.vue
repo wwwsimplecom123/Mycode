@@ -6,6 +6,7 @@ const view = ref("dashboard");
 const dashboard = ref({ total: 0, risk: {}, pending: 0, degraded: 0, trend: [] });
 const analyses = ref([]);
 const knowledge = ref([]);
+const selectedKnowledge = ref(null);
 const users = ref([]);
 const auditLogs = ref([]);
 const applications = ref([]);
@@ -17,6 +18,9 @@ const isDraggingEml = ref(false);
 const emlDragDepth = ref(0);
 const uploadMessage = ref("");
 const knowledgeType = ref("phishing_case");
+const knowledgeMessage = ref("");
+const knowledgeBusy = ref(false);
+const knowledgeImportProgress = ref({ total: 0, done: 0, failed: 0 });
 const providers = ref({ chat_endpoint: "", chat_model: "", embedding_endpoint: "", embedding_model: "", timeout: 25 });
 const providerKey = ref("");
 const providerMessage = ref("");
@@ -46,10 +50,24 @@ const filteredAnalyses = computed(() => {
   if (filter.type === "date") return analyses.value.filter((item) => String(item.created_at || "").startsWith(filter.value));
   return analyses.value;
 });
+const knowledgeStats = computed(() => ({
+  total: knowledge.value.length,
+  pending: knowledge.value.filter((item) => item.status === "pending").length,
+  published: knowledge.value.filter((item) => item.status === "published").length,
+  disabled: knowledge.value.filter((item) => item.status === "disabled").length,
+}));
+const pendingKnowledge = computed(() => knowledge.value.filter((item) => item.status === "pending"));
+const policyStats = computed(() => ({
+  trustedDomains: policyLines(policyForm.value.trusted_domains).length,
+  trustedIpRanges: policyLines(policyForm.value.trusted_ip_ranges).length,
+  blacklistedDomains: policyLines(policyForm.value.blacklisted_domains).length,
+  keywords: policyLines(policyForm.value.high_risk_keywords).length,
+}));
+const viewScopeLabel = computed(() => (user.value?.role === "admin" ? "全局视图" : "个人视图"));
 const navItems = computed(() => {
   const allItems = [
     ["dashboard", "首页"], ["upload", "EML 检测"], ["events", "邮件事件"],
-    ["internal", "内部钓鱼"], ["knowledge", "RAG 知识库"], ["applications", "应用中心"],
+    ["internal", "内部钓鱼"], ["knowledge", "RAG 知识库"], ["approvals", "审批中心"], ["applications", "应用中心"],
     ["policy", "策略管理"], ["users", "用户管理"], ["settings", "模型 API 设置"],
     ["audit", "审计日志"], ["system", "系统状态"],
   ];
@@ -248,11 +266,35 @@ async function dropEml(event) {
 }
 
 async function uploadKnowledge(event) {
-  const form = new FormData();
-  form.append("file", event.target.files[0]);
-  form.append("source_type", knowledgeType.value);
-  await api("/api/v1/knowledge/import", { method: "POST", body: form });
-  await refresh();
+  const files = Array.from(event.target.files || []);
+  event.target.value = "";
+  if (!files.length) return;
+  knowledgeBusy.value = true;
+  knowledgeImportProgress.value = { total: files.length, done: 0, failed: 0 };
+  const failures = [];
+  try {
+    for (const file of files) {
+      knowledgeMessage.value = `正在导入 ${knowledgeImportProgress.value.done + 1}/${files.length}：${file.name}`;
+      const form = new FormData();
+      form.append("file", file);
+      form.append("source_type", knowledgeType.value);
+      try {
+        await api("/api/v1/knowledge/import", { method: "POST", body: form });
+      } catch (error) {
+        knowledgeImportProgress.value.failed += 1;
+        failures.push(`${file.name}：${readError(error)}`);
+      } finally {
+        knowledgeImportProgress.value.done += 1;
+      }
+    }
+    const success = files.length - knowledgeImportProgress.value.failed;
+    knowledgeMessage.value = knowledgeImportProgress.value.failed
+      ? `批量导入完成：成功 ${success} 个，失败 ${knowledgeImportProgress.value.failed} 个。${failures.slice(0, 3).join("；")}`
+      : `批量导入完成：成功 ${success} 个，均已进入待审核。发布后才会参与后续深度检测。`;
+    await refresh();
+  } finally {
+    knowledgeBusy.value = false;
+  }
 }
 
 async function openAnalysis(item) {
@@ -308,9 +350,54 @@ function formatBytes(value) {
   return `${size} B`;
 }
 
-async function approve(item) {
-  await api(`/api/v1/knowledge/${item.id}/approve`, { method: "POST" });
+function openKnowledge(item) {
+  selectedKnowledge.value = item;
+}
+
+function knowledgePreview(item) {
+  return String(item?.content || item?.generalized_content || "").slice(0, 6000);
+}
+
+async function refreshAndKeepKnowledge(itemId = selectedKnowledge.value?.id) {
   await refresh();
+  selectedKnowledge.value = itemId ? knowledge.value.find((item) => item.id === itemId) || null : null;
+}
+
+async function approve(item) {
+  knowledgeMessage.value = "";
+  try {
+    await api(`/api/v1/knowledge/${item.id}/approve`, { method: "POST" });
+    knowledgeMessage.value = "知识已发布，新的邮件深度检测会检索该知识。";
+    await refreshAndKeepKnowledge(item.id);
+  } catch (error) {
+    knowledgeMessage.value = `发布失败：${readError(error)}`;
+  }
+}
+
+async function disableKnowledge(item) {
+  knowledgeMessage.value = "";
+  try {
+    await api(`/api/v1/knowledge/${item.id}/disable`, { method: "POST" });
+    knowledgeMessage.value = "知识已停用，不再参与后续 RAG 检索。";
+    await refreshAndKeepKnowledge(item.id);
+  } catch (error) {
+    knowledgeMessage.value = `停用失败：${readError(error)}`;
+  }
+}
+
+async function reindexKnowledge() {
+  if (!window.confirm("确定重建已导入知识的向量索引？该操作可能需要一些时间。")) return;
+  knowledgeBusy.value = true;
+  knowledgeMessage.value = "正在重建知识向量索引...";
+  try {
+    const result = await api("/api/v1/knowledge/reindex", { method: "POST" });
+    knowledgeMessage.value = `重建完成：成功 ${result.completed} 条，失败 ${result.failed} 条。`;
+    await refresh();
+  } catch (error) {
+    knowledgeMessage.value = `重建失败：${readError(error)}`;
+  } finally {
+    knowledgeBusy.value = false;
+  }
 }
 
 function setPolicyForm(policy) {
@@ -606,6 +693,11 @@ onMounted(async () => {
 });
 
 watch(view, async (name) => {
+  if (name === "approvals" && user.value?.role === "admin") {
+    if (!selectedKnowledge.value || selectedKnowledge.value.status !== "pending") {
+      selectedKnowledge.value = pendingKnowledge.value[0] || null;
+    }
+  }
   if (name === "dashboard") {
     await nextTick();
     renderChart();
@@ -639,9 +731,10 @@ onBeforeUnmount(() => {
       <button v-for="item in navItems" :key="item[0]" :class="{active:view===item[0]}" @click="openView(item[0])">{{ item[1] }}</button>
     </aside>
     <main>
-      <header><b>{{ {dashboard:'首页',upload:'EML 检测',events:'邮件事件',internal:'内部钓鱼',knowledge:'RAG 知识库',applications:'应用中心',policy:'策略管理',users:'用户管理',settings:'模型 API 设置',audit:'审计日志'}[view] || 'ShieldDome 控制台' }}</b><div class="user-area"><span>观察模式 · 不自动隔离</span><b>{{ user.display_name }}</b><small>{{ label(user.role) }}</small><button @click="logout">退出登录</button></div></header>
+      <header><b>{{ {dashboard:'首页',upload:'EML 检测',events:'邮件事件',internal:'内部钓鱼',knowledge:'RAG 知识库',approvals:'审批中心',applications:'应用中心',policy:'策略管理',users:'用户管理',settings:'模型 API 设置',audit:'审计日志'}[view] || 'ShieldDome 控制台' }}</b><div class="user-area"><span>{{ viewScopeLabel }} · 观察模式 · 不自动隔离</span><b>{{ user.display_name }}</b><small>{{ label(user.role) }}</small><button @click="logout">退出登录</button></div></header>
       <section class="content">
         <p v-if="serviceWarning" class="service-warning">{{ serviceWarning }}</p>
+        <p v-if="user.role !== 'admin' && ['dashboard','events','internal','audit'].includes(view)" class="scope-note">当前为个人视图，仅显示你本人提交或产生的邮件检测与审计记录。</p>
         <template v-if="view==='dashboard'">
           <div class="stats">
             <article class="stat-card clickable" role="button" tabindex="0" @click="drillToEvents('all','','全部邮件事件')" @keyup.enter="drillToEvents('all','','全部邮件事件')"><small>检测总量</small><strong>{{ dashboard.total }}</strong><span>查看全部事件 →</span></article>
@@ -658,34 +751,71 @@ onBeforeUnmount(() => {
           <div class="grid events"><article class="panel"><div class="event-heading"><div><h3>{{ eventFilter.label }}</h3><small>共 {{ filteredAnalyses.length }} 条结果</small></div><button v-if="eventFilter.type!=='all'" @click="clearEventFilter">清除筛选</button></div><table><thead><tr><th>时间</th><th>来源</th><th>状态</th><th>风险</th></tr></thead><tbody><tr v-for="item in filteredAnalyses" :key="item.id" @click="openAnalysis(item)"><td>{{ item.created_at?.slice(0,19) }}</td><td>{{ item.source_name }}</td><td>{{ label(item.status) }}</td><td><span :class="'tag '+item.risk_level">{{ label(item.risk_level) }}</span></td></tr><tr v-if="!filteredAnalyses.length"><td colspan="4" class="empty-row">当前筛选条件下暂无事件</td></tr></tbody></table></article><article class="panel detail"><div class="title-row"><div><h3>检测详情</h3><small>{{ selected?.id || '请选择左侧事件' }}</small></div><button v-if="selected && ['failed','degraded'].includes(selected.status)" @click="retrySelectedAnalysis">重新分析</button></div><p v-if="actionMessage" class="action-message">{{ actionMessage }}</p><template v-if="selected"><div class="detail-summary"><span :class="'tag '+selected.risk_level">{{ label(selected.risk_level) }}</span><b>{{ label(selected.status) }}</b><small>{{ selected.source_name }}</small></div><section class="evidence-block"><h4>判定依据</h4><p>{{ evidenceSource().reason || selected.quick_result?.reason || '暂无解释' }}</p><div class="evidence-grid"><div><b>命中规则</b><code>{{ evidenceRules().join(', ') || '-' }}</code></div><div><b>认证结果</b><code>{{ JSON.stringify(evidenceSource().authentication || selected.parsed_message?.authentication || {}) }}</code></div><div><b>模型状态</b><code>{{ evidenceSource().llm?.status || '-' }} {{ evidenceSource().llm?.error_type || '' }}</code></div><div><b>RAG 引用</b><code>{{ evidenceSource().rag?.references?.length || 0 }} 条</code></div></div><h4>链接风险</h4><table><thead><tr><th>显示域名</th><th>真实域名</th><th>错配</th><th>可信</th></tr></thead><tbody><tr v-for="(link,index) in evidenceLinks().slice(0,8)" :key="index"><td>{{ link.display_domain || '-' }}</td><td>{{ link.href_domain || '-' }}</td><td>{{ link.display_href_mismatch ? '是' : '否' }}</td><td>{{ link.trusted_href ? '是' : '否' }}</td></tr><tr v-if="!evidenceLinks().length"><td colspan="4" class="empty-row">暂无链接证据</td></tr></tbody></table><div class="settings-actions"><button @click="submitFeedback('false_positive')">标记误报</button><button @click="submitFeedback('confirmed_phishing')">确认钓鱼</button><button @click="submitFeedback('uncertain')">标记不确定</button></div></section><details><summary>原始 JSON</summary><pre>{{ JSON.stringify(selected || {}, null, 2) }}</pre></details></template><p v-else class="empty-row">请选择一条邮件事件查看详情</p></article></div>
         </template>
         <template v-else-if="view==='knowledge'">
-          <article class="panel"><div class="title-row"><div><h2>RAG 知识库</h2><p>知识审核后才参与正式检测。</p></div><div class="import-tools"><select v-model="knowledgeType"><option value="phishing_case">钓鱼案例</option><option value="trusted_email">可信邮件</option><option value="security_rule">安全规则</option><option value="soc_review">SOC 结论</option></select><label class="primary">导入知识<input type="file" accept=".eml,.txt,.md,.csv,.pdf" @change="uploadKnowledge"></label></div></div><table><thead><tr><th>标题</th><th>类型</th><th>状态</th><th>版本</th><th>操作</th></tr></thead><tbody><tr v-for="item in knowledge" :key="item.id"><td>{{ item.title }}</td><td>{{ label(item.source_type) }}</td><td>{{ label(item.status) }}</td><td>v{{ item.version }}</td><td><button @click="approve(item)" :disabled="item.status==='published'">发布</button></td></tr></tbody></table></article>
+          <div class="knowledge-page">
+            <article class="panel knowledge-heading">
+              <div><h2>RAG 知识库</h2><p>深度检测会检索已发布知识，为模型提供相似案例、可信样本和安全规则；待审核知识不会进入正式研判。</p></div>
+              <div class="import-tools"><select v-model="knowledgeType"><option value="phishing_case">钓鱼案例</option><option value="trusted_email">可信邮件</option><option value="security_rule">安全规则</option><option value="soc_review">SOC 结论</option></select><label :class="['primary',{disabled:knowledgeBusy}]">{{ knowledgeBusy ? '导入中...' : '批量导入' }}<input type="file" multiple accept=".eml,.txt,.md,.csv,.pdf" @change="uploadKnowledge" :disabled="knowledgeBusy"></label><button @click="reindexKnowledge" :disabled="knowledgeBusy || !knowledge.length">重建索引</button></div>
+            </article>
+            <div class="knowledge-flow">
+              <span>导入</span><b>→</b><span>待审核</span><b>→</b><span>发布</span><b>→</b><span>参与 RAG 检索</span>
+            </div>
+            <div class="stats compact knowledge-stats">
+              <article><small>全部知识</small><strong>{{ knowledgeStats.total }}</strong><span>含待审核与停用</span></article>
+              <article><small>参与检测</small><strong>{{ knowledgeStats.published }}</strong><span>仅已发布状态</span></article>
+              <article><small>待审核</small><strong>{{ knowledgeStats.pending }}</strong><span>需人工发布</span></article>
+              <article><small>已停用</small><strong>{{ knowledgeStats.disabled }}</strong><span>不参与检索</span></article>
+            </div>
+            <p v-if="knowledgeMessage" class="action-message">{{ knowledgeMessage }}</p>
+            <div v-if="knowledgeBusy && knowledgeImportProgress.total" class="knowledge-progress"><span :style="{width: `${Math.round((knowledgeImportProgress.done / knowledgeImportProgress.total) * 100)}%`}"></span><small>{{ knowledgeImportProgress.done }} / {{ knowledgeImportProgress.total }}</small></div>
+            <article class="panel knowledge-list">
+              <div class="panel-heading"><h3>知识条目</h3><small>导入 .eml/.txt/.md/.csv/.pdf 后，先审核再发布</small></div>
+              <table><thead><tr><th>标题</th><th>类型</th><th>状态</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in knowledge" :key="item.id"><td><b>{{ item.title }}</b><small class="subtext">{{ item.metadata?.filename || item.id }}</small></td><td>{{ label(item.source_type) }}</td><td><span :class="['status-pill', item.status === 'published' ? 'on' : 'off']">{{ label(item.status) }}</span></td><td>v{{ item.version }}</td><td>{{ item.updated_at?.slice(0,19).replace('T',' ') || '-' }}</td><td class="actions"><button @click="openKnowledge(item)">查看</button><button @click="approve(item)" :disabled="item.status==='published'">发布</button><button class="danger" @click="disableKnowledge(item)" :disabled="item.status==='disabled'">停用</button></td></tr><tr v-if="!knowledge.length"><td colspan="6" class="empty-row">暂无知识。导入后会先进入待审核，发布后才会被深度检测检索。</td></tr></tbody></table>
+            </article>
+            <article v-if="selectedKnowledge" class="panel knowledge-detail"><div class="title-row"><div><h3>知识详情</h3><small>{{ selectedKnowledge.id }}</small></div><div class="actions"><button @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published'">发布</button><button class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled'">停用</button><button @click="selectedKnowledge=null">关闭</button></div></div><div class="evidence-grid"><div><b>标题</b><code>{{ selectedKnowledge.title }}</code></div><div><b>类型 / 状态</b><code>{{ label(selectedKnowledge.source_type) }} / {{ label(selectedKnowledge.status) }}</code></div><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>更新时间</b><code>{{ selectedKnowledge.updated_at?.slice(0,19).replace('T',' ') || '-' }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></article>
+          </div>
+        </template>
+        <template v-else-if="view==='approvals' && user.role==='admin'">
+          <div class="approval-page">
+            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><b>{{ pendingKnowledge.length }} 项待审核</b></article>
+            <div class="approval-grid">
+              <article class="panel approval-list"><div class="panel-heading"><h3>待审核知识</h3><small>点击查看内容后再决定发布</small></div><table><thead><tr><th>标题</th><th>类型</th><th>来源</th><th>导入时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in pendingKnowledge" :key="item.id"><td><b>{{ item.title }}</b><small class="subtext">{{ item.id }}</small></td><td>{{ label(item.source_type) }}</td><td>{{ item.metadata?.filename || '-' }}</td><td>{{ item.created_at?.slice(0,19).replace('T',' ') || '-' }}</td><td class="actions"><button @click="openKnowledge(item)">查看</button><button @click="approve(item)">发布</button><button class="danger" @click="disableKnowledge(item)">停用</button></td></tr><tr v-if="!pendingKnowledge.length"><td colspan="5" class="empty-row">当前没有待审核知识。</td></tr></tbody></table></article>
+              <article class="panel approval-detail"><template v-if="selectedKnowledge"><div class="title-row"><div><h3>{{ selectedKnowledge.title }}</h3><small>{{ label(selectedKnowledge.source_type) }} · {{ label(selectedKnowledge.status) }}</small></div><div class="actions"><button @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published'">发布</button><button class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled'">停用</button></div></div><div class="evidence-grid"><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>版本</b><code>v{{ selectedKnowledge.version }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></template><p v-else class="empty-row">请选择左侧知识查看详情。</p></article>
+            </div>
+          </div>
         </template>
         <template v-else-if="view==='policy' && user.role==='admin'">
           <div class="policy-page">
             <article class="panel policy-heading">
-              <div><h2>检测策略管理</h2><p>所有配置保存到策略数据库，新提交的邮件立即生效，无需修改代码或重启服务。</p></div>
+              <div><h2>检测策略管理</h2><p>策略保存后立即影响新提交邮件。可信项降低误报，黑名单和关键词提供规则证据，阈值决定最终风险等级。</p></div>
               <button class="primary" @click="saveDetectionPolicy" :disabled="policyBusy">{{ policyBusy ? "正在保存..." : "保存并启用策略" }}</button>
             </article>
             <p v-if="policyMessage" class="action-message">{{ policyMessage }}</p>
-            <div class="policy-grid">
+            <div class="policy-summary">
+              <div><small>可信域名</small><b>{{ policyStats.trustedDomains }}</b></div>
+              <div><small>可信 IP/CIDR</small><b>{{ policyStats.trustedIpRanges }}</b></div>
+              <div><small>黑名单域名</small><b>{{ policyStats.blacklistedDomains }}</b></div>
+              <div><small>高风险关键词</small><b>{{ policyStats.keywords }}</b></div>
+              <div><small>当前阈值</small><b>{{ policyForm.medium }} / {{ policyForm.high }} / {{ policyForm.critical }}</b></div>
+            </div>
+            <div class="policy-grid refined">
               <article class="panel policy-card">
-                <h3>可信域名</h3><p>每行一个根域名。可选择是否让子域继承可信状态。</p>
+                <div class="policy-card-head"><span class="policy-kind trust">放行</span><div><h3>可信域名</h3><p>每行一个根域名。匹配后降低外链和发件人域风险。</p></div></div>
                 <textarea v-model="policyForm.trusted_domains" rows="9" spellcheck="false" placeholder="company.com&#10;mail.company.com"></textarea>
                 <label class="checkbox-line"><input v-model="policyForm.trusted_include_subdomains" type="checkbox"> 子域名继承可信</label>
                 <small>{{ policyLines(policyForm.trusted_domains).length }} 项</small>
               </article>
               <article class="panel policy-card">
-                <h3>可信 IP / CIDR</h3><p>仅这里配置的 IP 或网段会被视为内部可信地址；未配置的私网 IP 仍按外部链接分析。</p>
+                <div class="policy-card-head"><span class="policy-kind trust">放行</span><div><h3>可信 IP / CIDR</h3><p>仅这里配置的 IP 或网段会被视为内部可信地址。</p></div></div>
                 <textarea v-model="policyForm.trusted_ip_ranges" rows="9" spellcheck="false" placeholder="10.24.0.0/16&#10;192.168.10.8/32"></textarea>
                 <small>{{ policyLines(policyForm.trusted_ip_ranges).length }} 项</small>
               </article>
               <article class="panel policy-card">
-                <h3>黑名单域名</h3><p>每行一个域名。命中域名或其子域名时直接产生强风险证据。</p>
+                <div class="policy-card-head"><span class="policy-kind block">拦截</span><div><h3>黑名单域名</h3><p>命中域名或其子域名时直接产生强风险证据。</p></div></div>
                 <textarea v-model="policyForm.blacklisted_domains" rows="9" spellcheck="false" placeholder="evil-login.example&#10;phish.example"></textarea>
                 <small>{{ policyLines(policyForm.blacklisted_domains).length }} 项</small>
               </article>
               <article class="panel policy-card">
-                <h3>高风险关键词</h3><p>每行一个关键词。关键词本身只提供弱信号，需要与外链等证据组合判断。</p>
+                <div class="policy-card-head"><span class="policy-kind score">评分</span><div><h3>高风险关键词</h3><p>关键词本身只提供弱信号，需要与外链等证据组合判断。</p></div></div>
                 <textarea v-model="policyForm.high_risk_keywords" rows="9" spellcheck="false" placeholder="密码&#10;付款&#10;password"></textarea>
                 <small>{{ policyLines(policyForm.high_risk_keywords).length }} 项</small>
               </article>

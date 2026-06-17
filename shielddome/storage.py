@@ -248,8 +248,16 @@ class Database:
         rows = self._fetchall("SELECT * FROM analyses ORDER BY created_at DESC LIMIT ?", [min(limit, 500)])
         return [self._decode_analysis(row) for row in rows]
 
-    def dashboard(self) -> dict[str, Any]:
-        rows = self._fetchall("SELECT risk_level, status, created_at FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
+    def list_analyses_for_actor(self, user_id: str = "", username: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._fetchall("SELECT * FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
+        filtered = [item for item in (self._decode_analysis(row) for row in rows) if self._analysis_owned_by(item, user_id, username)]
+        return filtered[: min(limit, 500)]
+
+    def dashboard(self, user_id: str = "", username: str = "") -> dict[str, Any]:
+        rows = self._fetchall("SELECT risk_level, status, created_at, parsed_message FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
+        if user_id or username:
+            rows = [self._decode_analysis(row) for row in rows]
+            rows = [row for row in rows if self._analysis_owned_by(row, user_id, username)]
         risk = {"low": 0, "medium": 0, "high": 0, "critical": 0}
         for row in rows:
             level = row.get("risk_level") or "low"
@@ -334,10 +342,16 @@ class Database:
                 [str(uuid.uuid4()), actor, action, target, _json(details or {}), utc_now()],
             )
 
-    def list_audit(self, limit: int = 200) -> list[dict[str, Any]]:
+    def list_audit(self, limit: int = 200, actor: str = "") -> list[dict[str, Any]]:
+        params: list[Any] = []
+        where = ""
+        if actor:
+            where = "WHERE actor = ?"
+            params.append(actor)
+        params.append(min(limit, 1000))
         return [
             self._decode_json_fields(row, ["details"])
-            for row in self._fetchall("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?", [min(limit, 1000)])
+            for row in self._fetchall(f"SELECT * FROM audit_logs {where} ORDER BY created_at DESC LIMIT ?", params)
         ]
 
     def get_policy(self, key: str, default: Any = None) -> Any:
@@ -554,6 +568,14 @@ class Database:
 
     def _decode_analysis(self, row: dict[str, Any]) -> dict[str, Any]:
         return self._decode_json_fields(row, ["quick_result", "parsed_message", "result"])
+
+    @staticmethod
+    def _analysis_owned_by(item: dict[str, Any], user_id: str = "", username: str = "") -> bool:
+        submitted = (item.get("parsed_message") or {}).get("submitted_by") or {}
+        return bool(
+            (user_id and str(submitted.get("id") or "") == str(user_id))
+            or (username and str(submitted.get("username") or "") == str(username))
+        )
 
     @staticmethod
     def _daily_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

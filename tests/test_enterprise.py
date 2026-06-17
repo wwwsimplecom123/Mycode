@@ -364,6 +364,46 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(stored["status"], "queued")
         self.assertTrue(queued["deep_scan_required"])
 
+    def test_analysis_lists_and_dashboard_are_scoped_by_owner(self):
+        user_a = self.service.auth.create_user("owner.a", "Owner-Password-2026", "Owner A", "analyst")
+        user_b = self.service.auth.create_user("owner.b", "Owner-Password-2026", "Owner B", "analyst")
+        self.service.ingest_browser_probe(
+            {"subject": "A notice", "body_text": "Please review account status", "mail_client": "browser-extension:a"},
+            user_a,
+        )
+        self.service.ingest_browser_probe(
+            {"subject": "B notice", "body_text": "Please review account status", "mail_client": "browser-extension:b"},
+            user_b,
+        )
+
+        scoped_a = self.db.list_analyses_for_actor(user_a["id"], user_a["username"])
+        scoped_b = self.db.list_analyses_for_actor(user_b["id"], user_b["username"])
+
+        self.assertEqual(len(scoped_a), 1)
+        self.assertEqual(len(scoped_b), 1)
+        self.assertEqual(scoped_a[0]["parsed_message"]["submitted_by"]["username"], "owner.a")
+        self.assertEqual(scoped_b[0]["parsed_message"]["submitted_by"]["username"], "owner.b")
+        self.assertEqual(self.db.dashboard()["total"], 2)
+        self.assertEqual(self.db.dashboard(user_a["id"], user_a["username"])["total"], 1)
+
+    def test_eml_ingest_records_submitter_for_personal_visibility(self):
+        managed = self.service.auth.create_user("eml.owner", "Owner-Password-2026", "EML Owner", "analyst")
+        queued = self.service.ingest_eml("owned.eml", SAMPLE_EML, managed)
+        stored = self.db.get_analysis(queued["analysis_id"])
+
+        self.assertEqual(stored["parsed_message"]["submitted_by"]["username"], "eml.owner")
+        self.assertEqual(self.db.list_analyses_for_actor(managed["id"], managed["username"])[0]["id"], queued["analysis_id"])
+        self.assertEqual(self.db.list_audit(actor="eml.owner")[0]["target"], queued["analysis_id"])
+
+    def test_audit_log_can_be_scoped_by_actor(self):
+        self.db.record_audit("analyst.a", "analysis.created", "a")
+        self.db.record_audit("analyst.b", "analysis.created", "b")
+
+        scoped = self.db.list_audit(actor="analyst.a")
+
+        self.assertEqual(len(scoped), 1)
+        self.assertEqual(scoped[0]["actor"], "analyst.a")
+
     def test_browser_probe_ingest_normalizes_unexpected_payload_shapes(self):
         managed = self.service.auth.create_user("probe.shapes", "Probe-Password-2026", "Probe Shapes", "analyst")
         queued = self.service.ingest_browser_probe(

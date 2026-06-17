@@ -159,11 +159,20 @@ def require_console(
     x_api_key: str = Header(default=""),
     shielddome_session: str = Cookie(default=""),
 ) -> str:
+    actor = require_console_actor(authorization, x_api_key, shielddome_session)
+    return str(actor["username"])
+
+
+def require_console_actor(
+    authorization: str = Header(default=""),
+    x_api_key: str = Header(default=""),
+    shielddome_session: str = Cookie(default=""),
+) -> dict[str, Any]:
     user = SERVICE.auth.authenticate(session_token(authorization, shielddome_session))
     if user and user.get("role") in {"admin", "analyst", "auditor"}:
-        return str(user["username"])
+        return user
     if ADMIN_TOKEN and x_api_key == ADMIN_TOKEN:
-        return "api-admin"
+        return {"id": "api-admin", "username": "api-admin", "display_name": "API Admin", "role": "admin"}
     raise HTTPException(status_code=401, detail="请先登录或提供有效的控制台 API Key")
 
 
@@ -172,11 +181,20 @@ def require_ingest(
     x_api_key: str = Header(default=""),
     shielddome_session: str = Cookie(default=""),
 ) -> str:
+    actor = require_ingest_actor(authorization, x_api_key, shielddome_session)
+    return str(actor["username"])
+
+
+def require_ingest_actor(
+    authorization: str = Header(default=""),
+    x_api_key: str = Header(default=""),
+    shielddome_session: str = Cookie(default=""),
+) -> dict[str, Any]:
     user = SERVICE.auth.authenticate(session_token(authorization, shielddome_session))
     if user and user.get("role") in {"admin", "analyst"}:
-        return str(user["username"])
+        return user
     if INGEST_TOKEN and x_api_key == INGEST_TOKEN:
-        return "api-ingest"
+        return {"id": "api-ingest", "username": "api-ingest", "display_name": "API Ingest", "role": "admin"}
     raise HTTPException(status_code=401, detail="请先登录或提供有效的邮件接入 API Key")
 
 
@@ -224,6 +242,25 @@ def record_audit_safe(actor: str, action: str, target: str, metadata: dict[str, 
         SERVICE.db.record_audit(actor, action, target, metadata or {})
     except Exception:
         return
+
+
+def is_global_actor(actor: dict[str, Any]) -> bool:
+    return str(actor.get("role") or "") == "admin" or str(actor.get("username") or "") in {"api-admin", "api-ingest"}
+
+
+def actor_username(actor: dict[str, Any]) -> str:
+    return str(actor.get("username") or "")
+
+
+def ensure_analysis_visible(item: dict[str, Any], actor: dict[str, Any]) -> None:
+    if is_global_actor(actor):
+        return
+    submitted = (item.get("parsed_message") or {}).get("submitted_by") or {}
+    if str(submitted.get("id") or "") == str(actor.get("id") or ""):
+        return
+    if str(submitted.get("username") or "") == actor_username(actor):
+        return
+    raise HTTPException(status_code=403, detail="无权查看其他用户提交的邮件检测")
 
 
 @app.get("/api/v1/health")
@@ -345,46 +382,59 @@ def browser_probe_status(analysis_id: str, actor: dict[str, Any] = Depends(requi
     }
 
 
-@app.get("/api/v1/dashboard", dependencies=[Depends(require_console)])
-def dashboard() -> dict[str, Any]:
-    return SERVICE.db.dashboard()
+@app.get("/api/v1/dashboard")
+def dashboard(actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+    if is_global_actor(actor):
+        return SERVICE.db.dashboard()
+    return SERVICE.db.dashboard(str(actor.get("id") or ""), actor_username(actor))
 
 
 @app.post("/api/v1/messages/analyze", status_code=202)
-async def analyze_message(file: UploadFile = File(...), _actor: str = Depends(require_ingest)) -> dict[str, Any]:
+async def analyze_message(file: UploadFile = File(...), actor: dict[str, Any] = Depends(require_ingest_actor)) -> dict[str, Any]:
     filename = file.filename or "uploaded.eml"
     if not filename.lower().endswith(".eml"):
         raise HTTPException(status_code=400, detail="Only .eml files are accepted")
     try:
-        return SERVICE.ingest_eml(filename, await file.read())
+        return SERVICE.ingest_eml(filename, await file.read(), actor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/v1/analyses", dependencies=[Depends(require_console)])
-def list_analyses(limit: int = 100) -> dict[str, Any]:
-    return {"items": SERVICE.db.list_analyses(limit)}
+@app.get("/api/v1/analyses")
+def list_analyses(limit: int = 100, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+    if is_global_actor(actor):
+        return {"items": SERVICE.db.list_analyses(limit)}
+    return {"items": SERVICE.db.list_analyses_for_actor(str(actor.get("id") or ""), actor_username(actor), limit)}
 
 
 @app.get("/api/v1/analyses/{analysis_id}")
-def get_analysis(analysis_id: str, _actor: str = Depends(require_console)) -> dict[str, Any]:
+def get_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
     item = SERVICE.db.get_analysis(analysis_id)
     if not item:
         raise HTTPException(status_code=404, detail="Analysis not found")
+    ensure_analysis_visible(item, actor)
     return item
 
 
 @app.post("/api/v1/analyses/{analysis_id}/retry")
-def retry_analysis(analysis_id: str, actor: str = Depends(require_admin)) -> dict[str, Any]:
+def retry_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
     try:
-        return SERVICE.retry_analysis(analysis_id, actor)
+        item = SERVICE.db.get_analysis(analysis_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        ensure_analysis_visible(item, actor)
+        return SERVICE.retry_analysis(analysis_id, actor_username(actor))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/analyses/{analysis_id}/feedback")
-def feedback(analysis_id: str, request: FeedbackRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def feedback(analysis_id: str, request: FeedbackRequest, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
     try:
+        item = SERVICE.db.get_analysis(analysis_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        ensure_analysis_visible(item, actor)
         return SERVICE.feedback(analysis_id, request.verdict, request.comment)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -505,9 +555,11 @@ def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_a
     return {"key": key, "value": request.value}
 
 
-@app.get("/api/v1/audit", dependencies=[Depends(require_console)])
-def audit(limit: int = 200) -> dict[str, Any]:
-    return {"items": SERVICE.db.list_audit(limit)}
+@app.get("/api/v1/audit")
+def audit(limit: int = 200, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+    if is_global_actor(actor):
+        return {"items": SERVICE.db.list_audit(limit)}
+    return {"items": SERVICE.db.list_audit(limit, actor_username(actor))}
 
 
 @app.get("/api/v1/system/status", dependencies=[Depends(require_console)])

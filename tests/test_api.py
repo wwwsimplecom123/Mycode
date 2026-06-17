@@ -97,6 +97,16 @@ class BrowserProbeApiTests(unittest.TestCase):
         self.assertEqual(result["analysis_id"], "analysis-test")
         self.assertEqual(result["submitted_by"]["username"], "probe.user")
 
+    def test_analysis_visibility_rejects_other_non_admin_users(self):
+        item = {"parsed_message": {"submitted_by": {"id": "owner-1", "username": "owner.one"}}}
+
+        api_module.ensure_analysis_visible(item, {"id": "owner-1", "username": "owner.one", "role": "analyst"})
+        api_module.ensure_analysis_visible(item, {"id": "admin-1", "username": "admin", "role": "admin"})
+        with self.assertRaises(HTTPException) as raised:
+            api_module.ensure_analysis_visible(item, {"id": "owner-2", "username": "owner.two", "role": "analyst"})
+
+        self.assertEqual(raised.exception.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

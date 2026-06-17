@@ -38,12 +38,19 @@ class EnterpriseService:
         SETTINGS.raw_storage_dir.mkdir(parents=True, exist_ok=True)
         self.raw_store = RawStore(SETTINGS.raw_storage_dir, SETTINGS.data_encryption_key)
 
-    def ingest_eml(self, filename: str, raw: bytes) -> dict[str, Any]:
+    def ingest_eml(self, filename: str, raw: bytes, actor: dict[str, Any] | None = None) -> dict[str, Any]:
         if not raw:
             raise ValueError("EML 文件为空")
         if len(raw) > SETTINGS.max_upload_bytes:
             raise ValueError(f"EML 文件超过 {SETTINGS.max_upload_bytes // 1024 // 1024} MB 限制")
         parsed = parse_eml(raw)
+        if actor:
+            parsed["submitted_by"] = {
+                "id": str(actor.get("id") or ""),
+                "username": str(actor.get("username") or ""),
+                "display_name": str(actor.get("display_name") or ""),
+                "role": str(actor.get("role") or ""),
+            }
         quick_payload = {
             "subject": parsed["subject"],
             "sender": parsed["sender"],
@@ -57,11 +64,17 @@ class EnterpriseService:
         digest = hashlib.sha256(raw).hexdigest()
         raw_path = self.raw_store.put(digest, raw)
         analysis_id = self.db.create_analysis(filename, str(raw_path), parsed, quick)
+        audit_actor = str((actor or {}).get("username") or "api")
         self.db.record_audit(
-            "api",
+            audit_actor,
             "analysis.created",
             analysis_id,
-            {"filename": filename, "sha256": digest, "raw_storage_encrypted": self.raw_store.encrypted},
+            {
+                "filename": filename,
+                "sha256": digest,
+                "raw_storage_encrypted": self.raw_store.encrypted,
+                "user_id": str((actor or {}).get("id") or ""),
+            },
         )
         return {
             "analysis_id": analysis_id,

@@ -12,7 +12,8 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -24,8 +25,25 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(_json_safe(value), ensure_ascii=False, separators=(",", ":"), default=str)
+
 
 
 class Database:

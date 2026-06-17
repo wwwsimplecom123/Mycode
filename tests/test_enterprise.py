@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -232,6 +233,26 @@ class EnterpriseTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "queued")
         self.assertGreaterEqual(stats["queued"], 1)
+
+    def test_completed_task_serializes_uuid_values_in_result(self):
+        queued = self.service.ingest_eml("internal-phish.eml", SAMPLE_EML)
+        task = self.db.claim_task("uuid-worker")
+        reference_id = uuid.uuid4()
+
+        self.db.complete_task(
+            task["id"],
+            task["analysis_id"],
+            {
+                "analysis_id": task["analysis_id"],
+                "risk_level": "low",
+                "rag": {"references": [{"id": reference_id, "title": "UUID reference"}]},
+            },
+            False,
+        )
+        stored = self.db.get_analysis(queued["analysis_id"])
+
+        self.assertEqual(stored["status"], "completed")
+        self.assertEqual(stored["result"]["rag"]["references"][0]["id"], str(reference_id))
 
     def test_worker_heartbeat_is_recorded_in_system_status(self):
         self.db.record_worker_heartbeat("worker-a")

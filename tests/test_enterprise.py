@@ -343,6 +343,25 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(stored["status"], "queued")
         self.assertTrue(queued["deep_scan_required"])
 
+    def test_browser_probe_ingest_normalizes_unexpected_payload_shapes(self):
+        managed = self.service.auth.create_user("probe.shapes", "Probe-Password-2026", "Probe Shapes", "analyst")
+        queued = self.service.ingest_browser_probe(
+            {
+                "message_id": {"nested": "id"},
+                "subject": ["Security", "Notice"],
+                "sender": None,
+                "body_text": {"text": "Please review the security notice"},
+                "links": "not-a-list",
+                "mail_client": "browser-extension:test",
+            },
+            managed,
+        )
+        stored = self.db.get_analysis(queued["analysis_id"])
+
+        self.assertEqual(stored["parsed_message"]["links"], [])
+        self.assertIn("Security", stored["parsed_message"]["subject"])
+        self.assertEqual(stored["parsed_message"]["submitted_by"]["username"], "probe.shapes")
+
     def test_user_plugin_token_is_hashed_rotatable_and_revocable(self):
         managed = self.service.auth.create_user("probe.user", "Probe-Password-2026", "Probe User", "analyst")
         issued = self.service.auth.issue_plugin_token(managed["id"])

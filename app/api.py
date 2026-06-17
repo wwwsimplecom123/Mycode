@@ -37,6 +37,7 @@ PLUGIN_RATE_LIMIT: dict[str, deque[float]] = defaultdict(deque)
 LOGIN_LIMIT = (10, 15 * 60)
 PLUGIN_LIMIT = (120, 60)
 PLUGIN_MAX_BODY_BYTES = 256 * 1024
+PLUGIN_AUTH_OPTIONAL = os.getenv("SHIELDDOME_PLUGIN_AUTH_OPTIONAL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 app = FastAPI(
@@ -185,6 +186,17 @@ def require_browser_probe(x_shielddome_plugin_token: str = Header(default="")) -
         if not check_rate_limit(PLUGIN_RATE_LIMIT, token_key, *PLUGIN_LIMIT):
             raise HTTPException(status_code=429, detail="插件请求过于频繁，请稍后重试")
     user = SERVICE.auth.authenticate_plugin_token(x_shielddome_plugin_token)
+    if not user and PLUGIN_AUTH_OPTIONAL:
+        fallback_key = f"optional:{hashlib.sha256(str(x_shielddome_plugin_token or 'anonymous').encode('utf-8')).hexdigest()[:16]}"
+        if not check_rate_limit(PLUGIN_RATE_LIMIT, fallback_key, *PLUGIN_LIMIT):
+            raise HTTPException(status_code=429, detail="Plugin requests are too frequent; retry later")
+        return {
+            "id": "browser-probe-optional",
+            "username": "browser-probe",
+            "display_name": "Browser Probe",
+            "role": "analyst",
+            "auth_optional": True,
+        }
     if not user:
         raise HTTPException(status_code=401, detail="请配置有效的用户插件 Token")
     return user
@@ -198,6 +210,20 @@ def safe_probe_page_url(value: Any) -> str:
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))[:500]
     except ValueError:
         return ""
+
+
+def plugin_content_length(request: Request) -> int:
+    try:
+        return max(0, int(request.headers.get("content-length") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def record_audit_safe(actor: str, action: str, target: str, metadata: dict[str, Any] | None = None) -> None:
+    try:
+        SERVICE.db.record_audit(actor, action, target, metadata or {})
+    except Exception:
+        return
 
 
 @app.get("/api/v1/health")
@@ -254,40 +280,39 @@ def browser_probe_quick(
     actor: dict[str, Any] = Depends(require_browser_probe),
 ) -> dict[str, Any]:
     """Compatibility endpoint used by the downloadable browser probe."""
-    content_length = int(request.headers.get("content-length") or 0)
+    content_length = plugin_content_length(request)
     if content_length > PLUGIN_MAX_BODY_BYTES:
         raise HTTPException(status_code=413, detail="插件提交内容过大")
     if len(str(payload.get("body_text") or "").encode("utf-8")) > 12000 * 4:
         raise HTTPException(status_code=413, detail="邮件正文超出插件检测限制")
     try:
         result = SERVICE.ingest_browser_probe(payload, actor)
+        message_id = str(payload.get("message_id") or "")
+        record_audit_safe(
+            str(actor.get("username") or "browser-probe"),
+            "browser_probe.analysis_created",
+            str(result.get("analysis_id") or ""),
+            {
+                "user_id": actor.get("id"),
+                "display_name": actor.get("display_name"),
+                "message_id_sha256": hashlib.sha256(message_id.encode("utf-8")).hexdigest() if message_id else "",
+                "mail_client": str(payload.get("mail_client") or "")[:200],
+                "page_url": safe_probe_page_url(payload.get("page_url")),
+                "auth_optional": bool(actor.get("auth_optional")),
+            },
+        )
+        result["submitted_by"] = actor
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        SERVICE.db.record_audit(
+        record_audit_safe(
             str(actor.get("username") or "browser-probe"),
             "browser_probe.failed",
             "quick",
             {"error": str(exc)[:500], "mail_client": str(payload.get("mail_client") or "")[:200]},
         )
         raise HTTPException(status_code=400, detail=f"插件提交内容无法解析：{str(exc)[:200]}") from exc
-    message_id = str(payload.get("message_id") or "")
-    SERVICE.db.record_audit(
-        str(actor["username"]),
-        "browser_probe.analysis_created",
-        str(result["analysis_id"]),
-        {
-            "user_id": actor["id"],
-            "display_name": actor["display_name"],
-            "message_id_sha256": hashlib.sha256(message_id.encode("utf-8")).hexdigest() if message_id else "",
-            "mail_client": str(payload.get("mail_client") or "")[:200],
-            "page_url": safe_probe_page_url(payload.get("page_url")),
-        },
-    )
-    result["submitted_by"] = actor
-    return result
-
-
 @app.get("/api/email/auth/me")
 def browser_probe_identity(actor: dict[str, Any] = Depends(require_browser_probe)) -> dict[str, Any]:
     return actor

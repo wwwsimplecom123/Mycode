@@ -73,7 +73,7 @@
       detail: (text) => /readMail\.do|messageid=/i.test(location.href) || /发件人|收件人|主题|From|To|Subject/.test(text),
       subject: ["#subject", ".subject", "[name='subject']", "b", "strong"],
       sender: ["[email]", "[data-email]", ".sender", ".from"],
-      body: ["#mailContent", "#content", ".mail-content", ".mailBody", "td", "iframe"],
+      body: ["#mailContent", "#content", ".mail-content", ".mailBody", ".mailContent", "[id*='mailContent' i]", "[class*='mailContent' i]", "iframe"],
     },
   ];
 
@@ -145,6 +145,15 @@
         .slice(0, 3);
     }
     if (roots.length) return Array.from(new Set(roots));
+    if (adapter?.name === "chinaccs-webmail") {
+      return documents()
+        .map((doc) => doc.body)
+        .filter((node) => {
+          const value = visibleText(node);
+          return value.length >= MIN_BODY_LENGTH && /readMail\.do|messageid=|发件人|收件人|主题|From|To|Subject/.test(`${location.href}\n${value}`);
+        })
+        .slice(0, 1);
+    }
     return text.length >= MIN_BODY_LENGTH ? documents().map((doc) => doc.body).filter(Boolean) : [];
   }
 

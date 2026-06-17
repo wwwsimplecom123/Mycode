@@ -71,6 +71,15 @@ class EnterpriseService:
         }
 
     def ingest_browser_probe(self, payload: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Browser probe payload must be an object")
+        def probe_text(value: Any, limit: int) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, (dict, list, tuple, set)):
+                value = json.dumps(value, ensure_ascii=False, default=str)
+            return str(value).replace("\x00", "")[:limit]
+
         links = []
         if isinstance(payload.get("links"), list):
             for item in payload.get("links") or []:
@@ -78,25 +87,26 @@ class EnterpriseService:
                     continue
                 links.append(
                     {
-                        "display_text": str(item.get("display_text") or "")[:500],
-                        "href": str(item.get("href") or item.get("url") or "")[:2000],
-                        "context_before": str(item.get("context_before") or "")[-120:],
-                        "context_after": str(item.get("context_after") or "")[:120],
-                        "html_snippet": str(item.get("html_snippet") or "")[:300],
+                        "display_text": probe_text(item.get("display_text"), 500),
+                        "href": probe_text(item.get("href") or item.get("url"), 2000),
+                        "context_before": probe_text(item.get("context_before"), 120)[-120:],
+                        "context_after": probe_text(item.get("context_after"), 120),
+                        "html_snippet": probe_text(item.get("html_snippet"), 300),
                     }
                 )
         parsed = {
-            "subject": str(payload.get("subject") or "")[:300],
-            "sender": str(payload.get("sender") or "")[:500],
-            "recipient": str(payload.get("recipient") or "")[:1000],
-            "body_text": str(payload.get("body_text") or "")[:12000],
-            "body_summary": str(payload.get("body_summary") or "")[:1000],
+            "subject": probe_text(payload.get("subject"), 300),
+            "sender": probe_text(payload.get("sender"), 500),
+            "recipient": probe_text(payload.get("recipient"), 1000),
+            "body_text": probe_text(payload.get("body_text"), 12000),
+            "body_summary": probe_text(payload.get("body_summary"), 1000),
             "links": links[:50],
             "attachments": [],
             "authentication": {},
-            "message_id": str(payload.get("message_id") or "")[:500],
-            "mail_client": str(payload.get("mail_client") or "")[:200],
-            "page_url": str(payload.get("page_url") or "")[:500],
+            "headers": {},
+            "message_id": probe_text(payload.get("message_id"), 500),
+            "mail_client": probe_text(payload.get("mail_client"), 200),
+            "page_url": probe_text(payload.get("page_url"), 500),
             "submitted_by": {
                 "id": str(actor.get("id") or ""),
                 "username": str(actor.get("username") or ""),

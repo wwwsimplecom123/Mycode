@@ -9,6 +9,14 @@ function normalizeApiBase(value) {
   return parsed.origin;
 }
 
+function statusHint(status, detail) {
+  if (status === 401 || status === 403) return `插件 Token 无效或无权访问（${status}）：${detail || "请重新签发 Token"}`;
+  if (status === 413) return `提交内容过大（${status}）：${detail || "请缩短邮件正文后重试"}`;
+  if (status === 429) return `请求过于频繁（${status}）：${detail || "请稍后再试"}`;
+  if (status >= 500) return `ShieldDome 服务端异常（${status}）：${detail || "请查看服务器日志"}`;
+  return `ShieldDome 接口返回 ${status}${detail ? `：${detail}` : ""}`;
+}
+
 async function apiRequest(message) {
   const apiBase = normalizeApiBase(message.apiBase);
   const target = new URL(String(message.path || "/"), `${apiBase}/`);
@@ -42,7 +50,7 @@ async function apiRequest(message) {
   }
   if (!response.ok) {
     const detail = data && typeof data === "object" ? data.detail : data;
-    throw new Error(`ShieldDome 接口返回 ${response.status}${detail ? `：${detail}` : ""}`);
+    throw new Error(statusHint(response.status, detail));
   }
   return data;
 }

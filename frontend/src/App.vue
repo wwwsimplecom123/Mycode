@@ -7,6 +7,7 @@ const dashboard = ref({ total: 0, risk: {}, pending: 0, degraded: 0, trend: [] }
 const analyses = ref([]);
 const knowledge = ref([]);
 const selectedKnowledge = ref(null);
+const selectedApprovalIds = ref([]);
 const users = ref([]);
 const auditLogs = ref([]);
 const applications = ref([]);
@@ -20,6 +21,8 @@ const uploadMessage = ref("");
 const knowledgeType = ref("phishing_case");
 const knowledgeMessage = ref("");
 const knowledgeBusy = ref(false);
+const knowledgeActionId = ref("");
+const approvalBusy = ref(false);
 const knowledgeImportProgress = ref({ total: 0, done: 0, failed: 0 });
 const providers = ref({ chat_endpoint: "", chat_model: "", embedding_endpoint: "", embedding_model: "", timeout: 25 });
 const providerKey = ref("");
@@ -57,6 +60,7 @@ const knowledgeStats = computed(() => ({
   disabled: knowledge.value.filter((item) => item.status === "disabled").length,
 }));
 const pendingKnowledge = computed(() => knowledge.value.filter((item) => item.status === "pending"));
+const allPendingSelected = computed(() => pendingKnowledge.value.length > 0 && pendingKnowledge.value.every((item) => selectedApprovalIds.value.includes(item.id)));
 const policyStats = computed(() => ({
   trustedDomains: policyLines(policyForm.value.trusted_domains).length,
   trustedIpRanges: policyLines(policyForm.value.trusted_ip_ranges).length,
@@ -354,6 +358,20 @@ function openKnowledge(item) {
   selectedKnowledge.value = item;
 }
 
+function isApprovalSelected(item) {
+  return selectedApprovalIds.value.includes(item.id);
+}
+
+function toggleApprovalSelection(item) {
+  selectedApprovalIds.value = isApprovalSelected(item)
+    ? selectedApprovalIds.value.filter((id) => id !== item.id)
+    : [...selectedApprovalIds.value, item.id];
+}
+
+function toggleAllPendingApprovals() {
+  selectedApprovalIds.value = allPendingSelected.value ? [] : pendingKnowledge.value.map((item) => item.id);
+}
+
 function knowledgePreview(item) {
   return String(item?.content || item?.generalized_content || "").slice(0, 6000);
 }
@@ -361,27 +379,63 @@ function knowledgePreview(item) {
 async function refreshAndKeepKnowledge(itemId = selectedKnowledge.value?.id) {
   await refresh();
   selectedKnowledge.value = itemId ? knowledge.value.find((item) => item.id === itemId) || null : null;
+  const pendingIds = new Set(pendingKnowledge.value.map((item) => item.id));
+  selectedApprovalIds.value = selectedApprovalIds.value.filter((id) => pendingIds.has(id));
 }
 
 async function approve(item) {
   knowledgeMessage.value = "";
+  if (!item?.id || knowledgeActionId.value || approvalBusy.value) return;
+  knowledgeActionId.value = item.id;
   try {
     await api(`/api/v1/knowledge/${item.id}/approve`, { method: "POST" });
     knowledgeMessage.value = "知识已发布，新的邮件深度检测会检索该知识。";
     await refreshAndKeepKnowledge(item.id);
   } catch (error) {
     knowledgeMessage.value = `发布失败：${readError(error)}`;
+  } finally {
+    knowledgeActionId.value = "";
   }
 }
 
 async function disableKnowledge(item) {
   knowledgeMessage.value = "";
+  if (!item?.id || knowledgeActionId.value || approvalBusy.value) return;
+  knowledgeActionId.value = item.id;
   try {
     await api(`/api/v1/knowledge/${item.id}/disable`, { method: "POST" });
     knowledgeMessage.value = "知识已停用，不再参与后续 RAG 检索。";
     await refreshAndKeepKnowledge(item.id);
   } catch (error) {
     knowledgeMessage.value = `停用失败：${readError(error)}`;
+  } finally {
+    knowledgeActionId.value = "";
+  }
+}
+
+async function bulkKnowledgeAction(action) {
+  const ids = [...selectedApprovalIds.value];
+  if (!ids.length || approvalBusy.value) return;
+  const isApprove = action === "approve";
+  const text = isApprove ? "发布" : "停用";
+  if (!window.confirm(`确定批量${text}选中的 ${ids.length} 条知识？`)) return;
+  approvalBusy.value = true;
+  knowledgeMessage.value = `正在批量${text} ${ids.length} 条知识...`;
+  try {
+    const result = await api(`/api/v1/knowledge/bulk-${isApprove ? "approve" : "disable"}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    knowledgeMessage.value = result.failed?.length
+      ? `批量${text}完成：成功 ${result.completed} 条，失败 ${result.failed.length} 条。`
+      : `批量${text}完成：成功 ${result.completed} 条。`;
+    selectedApprovalIds.value = [];
+    await refreshAndKeepKnowledge();
+  } catch (error) {
+    knowledgeMessage.value = `批量${text}失败：${readError(error)}`;
+  } finally {
+    approvalBusy.value = false;
   }
 }
 
@@ -769,17 +823,64 @@ onBeforeUnmount(() => {
             <div v-if="knowledgeBusy && knowledgeImportProgress.total" class="knowledge-progress"><span :style="{width: `${Math.round((knowledgeImportProgress.done / knowledgeImportProgress.total) * 100)}%`}"></span><small>{{ knowledgeImportProgress.done }} / {{ knowledgeImportProgress.total }}</small></div>
             <article class="panel knowledge-list">
               <div class="panel-heading"><h3>知识条目</h3><small>导入 .eml/.txt/.md/.csv/.pdf 后，先审核再发布</small></div>
-              <table><thead><tr><th>标题</th><th>类型</th><th>状态</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in knowledge" :key="item.id"><td><b>{{ item.title }}</b><small class="subtext">{{ item.metadata?.filename || item.id }}</small></td><td>{{ label(item.source_type) }}</td><td><span :class="['status-pill', item.status === 'published' ? 'on' : 'off']">{{ label(item.status) }}</span></td><td>v{{ item.version }}</td><td>{{ item.updated_at?.slice(0,19).replace('T',' ') || '-' }}</td><td class="actions"><button @click="openKnowledge(item)">查看</button><button @click="approve(item)" :disabled="item.status==='published'">发布</button><button class="danger" @click="disableKnowledge(item)" :disabled="item.status==='disabled'">停用</button></td></tr><tr v-if="!knowledge.length"><td colspan="6" class="empty-row">暂无知识。导入后会先进入待审核，发布后才会被深度检测检索。</td></tr></tbody></table>
+              <table>
+                <thead><tr><th>标题</th><th>类型</th><th>状态</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in knowledge" :key="item.id" @click="openKnowledge(item)">
+                    <td><b>{{ item.title }}</b><small class="subtext">{{ item.metadata?.filename || item.id }}</small></td>
+                    <td>{{ label(item.source_type) }}</td>
+                    <td><span :class="['status-pill', item.status === 'published' ? 'on' : 'off']">{{ label(item.status) }}</span></td>
+                    <td>v{{ item.version }}</td>
+                    <td>{{ item.updated_at?.slice(0,19).replace('T',' ') || '-' }}</td>
+                    <td class="actions" @click.stop>
+                      <button type="button" @click.stop="openKnowledge(item)">查看</button>
+                      <template v-if="user.role==='admin'">
+                        <button type="button" @click.stop="approve(item)" :disabled="item.status==='published' || knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '发布' }}</button>
+                        <button type="button" class="danger" @click.stop="disableKnowledge(item)" :disabled="item.status==='disabled' || knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '停用' }}</button>
+                      </template>
+                      <small v-else class="subtext">仅管理员审批</small>
+                    </td>
+                  </tr>
+                  <tr v-if="!knowledge.length"><td colspan="6" class="empty-row">暂无知识。导入后会先进入待审核，发布后才会被深度检测检索。</td></tr>
+                </tbody>
+              </table>
             </article>
-            <article v-if="selectedKnowledge" class="panel knowledge-detail"><div class="title-row"><div><h3>知识详情</h3><small>{{ selectedKnowledge.id }}</small></div><div class="actions"><button @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published'">发布</button><button class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled'">停用</button><button @click="selectedKnowledge=null">关闭</button></div></div><div class="evidence-grid"><div><b>标题</b><code>{{ selectedKnowledge.title }}</code></div><div><b>类型 / 状态</b><code>{{ label(selectedKnowledge.source_type) }} / {{ label(selectedKnowledge.status) }}</code></div><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>更新时间</b><code>{{ selectedKnowledge.updated_at?.slice(0,19).replace('T',' ') || '-' }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></article>
+            <article v-if="selectedKnowledge" class="panel knowledge-detail"><div class="title-row"><div><h3>知识详情</h3><small>{{ selectedKnowledge.id }}</small></div><div class="actions"><template v-if="user.role==='admin'"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></template><button type="button" @click="selectedKnowledge=null">关闭</button></div></div><div class="evidence-grid"><div><b>标题</b><code>{{ selectedKnowledge.title }}</code></div><div><b>类型 / 状态</b><code>{{ label(selectedKnowledge.source_type) }} / {{ label(selectedKnowledge.status) }}</code></div><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>更新时间</b><code>{{ selectedKnowledge.updated_at?.slice(0,19).replace('T',' ') || '-' }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></article>
           </div>
         </template>
         <template v-else-if="view==='approvals' && user.role==='admin'">
           <div class="approval-page">
-            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><b>{{ pendingKnowledge.length }} 项待审核</b></article>
+            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><div class="approval-summary"><b>{{ pendingKnowledge.length }} 项待审核</b><small>已选择 {{ selectedApprovalIds.length }} 项</small></div></article>
             <div class="approval-grid">
-              <article class="panel approval-list"><div class="panel-heading"><h3>待审核知识</h3><small>点击查看内容后再决定发布</small></div><table><thead><tr><th>标题</th><th>类型</th><th>来源</th><th>导入时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in pendingKnowledge" :key="item.id"><td><b>{{ item.title }}</b><small class="subtext">{{ item.id }}</small></td><td>{{ label(item.source_type) }}</td><td>{{ item.metadata?.filename || '-' }}</td><td>{{ item.created_at?.slice(0,19).replace('T',' ') || '-' }}</td><td class="actions"><button @click="openKnowledge(item)">查看</button><button @click="approve(item)">发布</button><button class="danger" @click="disableKnowledge(item)">停用</button></td></tr><tr v-if="!pendingKnowledge.length"><td colspan="5" class="empty-row">当前没有待审核知识。</td></tr></tbody></table></article>
-              <article class="panel approval-detail"><template v-if="selectedKnowledge"><div class="title-row"><div><h3>{{ selectedKnowledge.title }}</h3><small>{{ label(selectedKnowledge.source_type) }} · {{ label(selectedKnowledge.status) }}</small></div><div class="actions"><button @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published'">发布</button><button class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled'">停用</button></div></div><div class="evidence-grid"><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>版本</b><code>v{{ selectedKnowledge.version }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></template><p v-else class="empty-row">请选择左侧知识查看详情。</p></article>
+              <article class="panel approval-list">
+                <div class="panel-heading">
+                  <div><h3>待审核知识</h3><small>点击查看内容后再决定发布</small></div>
+                  <div class="actions">
+                    <button type="button" @click="toggleAllPendingApprovals" :disabled="approvalBusy || !pendingKnowledge.length">{{ allPendingSelected ? '取消全选' : '全选' }}</button>
+                    <button type="button" @click="bulkKnowledgeAction('approve')" :disabled="approvalBusy || !selectedApprovalIds.length">{{ approvalBusy ? '处理中' : '批量发布' }}</button>
+                    <button type="button" class="danger" @click="bulkKnowledgeAction('disable')" :disabled="approvalBusy || !selectedApprovalIds.length">{{ approvalBusy ? '处理中' : '批量停用' }}</button>
+                  </div>
+                </div>
+                <table>
+                  <thead><tr><th class="check-col">选择</th><th>标题</th><th>类型</th><th>来源</th><th>导入时间</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr v-for="item in pendingKnowledge" :key="item.id" @click="openKnowledge(item)">
+                      <td class="check-col" @click.stop><input type="checkbox" :checked="isApprovalSelected(item)" @change="toggleApprovalSelection(item)"></td>
+                      <td><b>{{ item.title }}</b><small class="subtext">{{ item.id }}</small></td>
+                      <td>{{ label(item.source_type) }}</td>
+                      <td>{{ item.metadata?.filename || '-' }}</td>
+                      <td>{{ item.created_at?.slice(0,19).replace('T',' ') || '-' }}</td>
+                      <td class="actions" @click.stop>
+                        <button type="button" @click.stop="openKnowledge(item)">查看</button>
+                        <button type="button" @click.stop="approve(item)" :disabled="knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '发布' }}</button>
+                        <button type="button" class="danger" @click.stop="disableKnowledge(item)" :disabled="knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '停用' }}</button>
+                      </td>
+                    </tr>
+                    <tr v-if="!pendingKnowledge.length"><td colspan="6" class="empty-row">当前没有待审核知识。</td></tr>
+                  </tbody>
+                </table>
+              </article>
+              <article class="panel approval-detail"><template v-if="selectedKnowledge"><div class="title-row"><div><h3>{{ selectedKnowledge.title }}</h3><small>{{ label(selectedKnowledge.source_type) }} · {{ label(selectedKnowledge.status) }}</small></div><div class="actions"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></div></div><div class="evidence-grid"><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>版本</b><code>v{{ selectedKnowledge.version }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></template><p v-else class="empty-row">请选择左侧知识查看详情。</p></article>
             </div>
           </div>
         </template>

@@ -73,6 +73,10 @@ class KnowledgeTextRequest(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+class KnowledgeBulkRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class PolicyRequest(BaseModel):
     value: Any
 
@@ -488,6 +492,32 @@ def approve_knowledge(item_id: str, _actor: str = Depends(require_admin)) -> dic
 @app.post("/api/v1/knowledge/{item_id}/disable")
 def disable_knowledge(item_id: str, _actor: str = Depends(require_admin)) -> dict[str, Any]:
     return SERVICE.disable_knowledge(item_id)
+
+
+@app.post("/api/v1/knowledge/bulk-approve")
+def bulk_approve_knowledge(request: KnowledgeBulkRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+    completed = 0
+    failed: list[dict[str, str]] = []
+    for item_id in request.ids:
+        try:
+            SERVICE.approve_knowledge(item_id)
+            completed += 1
+        except Exception as exc:  # pragma: no cover - defensive per-item reporting
+            failed.append({"id": item_id, "error": str(exc)})
+    return {"requested": len(request.ids), "completed": completed, "failed": failed}
+
+
+@app.post("/api/v1/knowledge/bulk-disable")
+def bulk_disable_knowledge(request: KnowledgeBulkRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+    completed = 0
+    failed: list[dict[str, str]] = []
+    for item_id in request.ids:
+        try:
+            SERVICE.disable_knowledge(item_id)
+            completed += 1
+        except Exception as exc:  # pragma: no cover - defensive per-item reporting
+            failed.append({"id": item_id, "error": str(exc)})
+    return {"requested": len(request.ids), "completed": completed, "failed": failed}
 
 
 @app.post("/api/v1/knowledge/reindex")

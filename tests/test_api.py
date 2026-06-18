@@ -45,6 +45,20 @@ class FakeService:
         }
 
 
+class FakeKnowledgeService:
+    def __init__(self):
+        self.approved = []
+        self.disabled = []
+
+    def approve_knowledge(self, item_id):
+        self.approved.append(item_id)
+        return {"id": item_id, "status": "published"}
+
+    def disable_knowledge(self, item_id):
+        self.disabled.append(item_id)
+        return {"id": item_id, "status": "disabled"}
+
+
 class BrowserProbeApiTests(unittest.TestCase):
     def setUp(self):
         self.original_service = api_module.SERVICE
@@ -106,6 +120,19 @@ class BrowserProbeApiTests(unittest.TestCase):
             api_module.ensure_analysis_visible(item, {"id": "owner-2", "username": "owner.two", "role": "analyst"})
 
         self.assertEqual(raised.exception.status_code, 403)
+
+    def test_bulk_knowledge_actions_call_each_item(self):
+        service = FakeKnowledgeService()
+        api_module.SERVICE = service
+        request = api_module.KnowledgeBulkRequest(ids=["k1", "k2"])
+
+        approved = api_module.bulk_approve_knowledge(request, _actor="admin")
+        disabled = api_module.bulk_disable_knowledge(request, _actor="admin")
+
+        self.assertEqual(approved["completed"], 2)
+        self.assertEqual(disabled["completed"], 2)
+        self.assertEqual(service.approved, ["k1", "k2"])
+        self.assertEqual(service.disabled, ["k1", "k2"])
 
 
 if __name__ == "__main__":

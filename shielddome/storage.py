@@ -297,6 +297,23 @@ class Database:
             )
         return item_id
 
+    def find_knowledge_by_content_hash(self, content_sha256: str) -> dict[str, Any] | None:
+        if not content_sha256:
+            return None
+        try:
+            if self._is_postgres:
+                row = self._fetchone("SELECT * FROM knowledge WHERE metadata->>'content_sha256' = ? ORDER BY created_at DESC LIMIT 1", [content_sha256])
+            else:
+                row = self._fetchone("SELECT * FROM knowledge WHERE json_extract(metadata, '$.content_sha256') = ? ORDER BY created_at DESC LIMIT 1", [content_sha256])
+            if row:
+                return self._decode_json_fields(row, ["metadata", "embedding"])
+        except Exception:
+            pass
+        for item in self.list_knowledge():
+            if (item.get("metadata") or {}).get("content_sha256") == content_sha256:
+                return item
+        return None
+
     def update_knowledge(self, item_id: str, status: str | None = None, embedding: list[float] | None = None) -> None:
         if status:
             self._execute_direct("UPDATE knowledge SET status = ?, updated_at = ? WHERE id = ?", [status, utc_now(), item_id])

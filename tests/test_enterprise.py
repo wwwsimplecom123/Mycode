@@ -107,6 +107,15 @@ class RecordingProvider(FakeProvider):
         return super().chat(context)
 
 
+class CountingProvider(FakeProvider):
+    def __init__(self):
+        self.embed_calls = 0
+
+    def embed(self, texts):
+        self.embed_calls += 1
+        return super().embed(texts)
+
+
 class TimeoutProvider(SiliconFlowProvider):
     def _post(self, endpoint, payload):
         raise TimeoutError("The read operation timed out")
@@ -299,6 +308,19 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(self.service.search_knowledge("password reset"), [])
         self.service.approve_knowledge(item["id"])
         self.assertEqual(self.service.search_knowledge("password reset")[0]["title"], "OA phishing")
+
+    def test_duplicate_knowledge_import_is_skipped_before_embedding(self):
+        provider = CountingProvider()
+        service = EnterpriseService(database=self.db, provider=provider)
+
+        first = service.import_knowledge("OA phishing", "phishing_case", "password reset evil login")
+        second = service.import_knowledge("OA phishing copy", "phishing_case", "password reset evil login")
+
+        self.assertFalse(first["duplicate"])
+        self.assertTrue(second["duplicate"])
+        self.assertEqual(second["existing_id"], first["id"])
+        self.assertEqual(provider.embed_calls, 1)
+        self.assertEqual(len(self.db.list_knowledge()), 1)
 
     def test_feedback_creates_pending_review_knowledge_without_raw_body_in_audit(self):
         queued = self.service.ingest_eml("internal-phish.eml", SAMPLE_EML)

@@ -274,7 +274,7 @@ async function uploadKnowledge(event) {
   event.target.value = "";
   if (!files.length) return;
   knowledgeBusy.value = true;
-  knowledgeImportProgress.value = { total: files.length, done: 0, failed: 0 };
+  knowledgeImportProgress.value = { total: files.length, done: 0, failed: 0, duplicate: 0 };
   const failures = [];
   try {
     for (const file of files) {
@@ -283,7 +283,8 @@ async function uploadKnowledge(event) {
       form.append("file", file);
       form.append("source_type", knowledgeType.value);
       try {
-        await api("/api/v1/knowledge/import", { method: "POST", body: form });
+        const result = await api("/api/v1/knowledge/import", { method: "POST", body: form });
+        if (result.duplicate) knowledgeImportProgress.value.duplicate += 1;
       } catch (error) {
         knowledgeImportProgress.value.failed += 1;
         failures.push(`${file.name}：${readError(error)}`);
@@ -291,10 +292,11 @@ async function uploadKnowledge(event) {
         knowledgeImportProgress.value.done += 1;
       }
     }
-    const success = files.length - knowledgeImportProgress.value.failed;
+    const duplicate = knowledgeImportProgress.value.duplicate || 0;
+    const success = files.length - duplicate - knowledgeImportProgress.value.failed;
     knowledgeMessage.value = knowledgeImportProgress.value.failed
-      ? `批量导入完成：成功 ${success} 个，失败 ${knowledgeImportProgress.value.failed} 个。${failures.slice(0, 3).join("；")}`
-      : `批量导入完成：成功 ${success} 个，均已进入待审核。发布后才会参与后续深度检测。`;
+      ? `批量导入完成：成功 ${success} 个，重复跳过 ${duplicate} 个，失败 ${knowledgeImportProgress.value.failed} 个。${failures.slice(0, 3).join("；")}`
+      : `批量导入完成：成功 ${success} 个，重复跳过 ${duplicate} 个。新知识已进入待审核，发布后才会参与后续深度检测。`;
     await refresh();
   } finally {
     knowledgeBusy.value = false;

@@ -256,16 +256,35 @@ class EnterpriseService:
         return result, degraded
 
     def import_knowledge(self, title: str, source_type: str, content: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        self._sync_provider_secret()
         if source_type not in {"trusted_email", "phishing_case", "security_rule", "soc_review"}:
             raise ValueError("Unsupported knowledge source_type")
         generalized = generalize_entities(content)["text"]
-        item_id = self.db.add_knowledge(title, source_type, content, generalized, metadata or {})
+        content_hash = hashlib.sha256(generalized.strip().encode("utf-8")).hexdigest()
+        existing = self.db.find_knowledge_by_content_hash(content_hash)
+        if existing:
+            item_id = str(existing.get("id") or "")
+            self.db.record_audit(
+                "admin",
+                "knowledge.duplicate_skipped",
+                item_id,
+                {"title": title, "source_type": source_type, "existing_status": existing.get("status")},
+            )
+            return {
+                "id": item_id,
+                "status": existing.get("status") or "unknown",
+                "duplicate": True,
+                "existing_id": item_id,
+                "embedding_status": "skipped_duplicate",
+            }
+        self._sync_provider_secret()
+        enriched_metadata = dict(metadata or {})
+        enriched_metadata["content_sha256"] = content_hash
+        item_id = self.db.add_knowledge(title, source_type, content, generalized, enriched_metadata)
         embedded = self.provider.embed([generalized[:8000]])
         if embedded.get("vectors"):
             self.db.update_knowledge(item_id, embedding=embedded["vectors"][0])
         self.db.record_audit("admin", "knowledge.imported", item_id, {"title": title, "source_type": source_type})
-        return {"id": item_id, "status": "pending", "embedding_status": embedded.get("status")}
+        return {"id": item_id, "status": "pending", "duplicate": False, "embedding_status": embedded.get("status")}
 
     def approve_knowledge(self, item_id: str) -> dict[str, Any]:
         self.db.update_knowledge(item_id, status="published")

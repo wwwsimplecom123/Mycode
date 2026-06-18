@@ -481,7 +481,15 @@ def import_knowledge_text(request: KnowledgeTextRequest, _actor: str = Depends(r
 
 @app.get("/api/v1/knowledge", dependencies=[Depends(require_console)])
 def list_knowledge() -> dict[str, Any]:
-    return {"items": SERVICE.db.list_knowledge()}
+    return {"items": SERVICE.db.list_knowledge_summaries()}
+
+
+@app.get("/api/v1/knowledge/{item_id}", dependencies=[Depends(require_console)])
+def knowledge_detail(item_id: str) -> dict[str, Any]:
+    item = SERVICE.db.get_knowledge(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+    return item
 
 
 @app.post("/api/v1/knowledge/{item_id}/approve")

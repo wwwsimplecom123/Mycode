@@ -22,6 +22,7 @@ const knowledgeType = ref("phishing_case");
 const knowledgeMessage = ref("");
 const knowledgeBusy = ref(false);
 const knowledgeActionId = ref("");
+const knowledgeDetailBusy = ref("");
 const approvalBusy = ref(false);
 const knowledgeImportProgress = ref({ total: 0, done: 0, failed: 0 });
 const providers = ref({ chat_endpoint: "", chat_model: "", embedding_endpoint: "", embedding_model: "", timeout: 25 });
@@ -356,8 +357,17 @@ function formatBytes(value) {
   return `${size} B`;
 }
 
-function openKnowledge(item) {
+async function openKnowledge(item) {
   selectedKnowledge.value = item;
+  if (!item?.id || item.content || item.generalized_content) return;
+  knowledgeDetailBusy.value = item.id;
+  try {
+    selectedKnowledge.value = await api(`/api/v1/knowledge/${item.id}`);
+  } catch (error) {
+    knowledgeMessage.value = `加载知识详情失败：${readError(error)}`;
+  } finally {
+    knowledgeDetailBusy.value = "";
+  }
 }
 
 function isApprovalSelected(item) {
@@ -380,7 +390,9 @@ function knowledgePreview(item) {
 
 async function refreshAndKeepKnowledge(itemId = selectedKnowledge.value?.id) {
   await refresh();
-  selectedKnowledge.value = itemId ? knowledge.value.find((item) => item.id === itemId) || null : null;
+  const kept = itemId ? knowledge.value.find((item) => item.id === itemId) || null : null;
+  selectedKnowledge.value = kept;
+  if (kept) await openKnowledge(kept);
   const pendingIds = new Set(pendingKnowledge.value.map((item) => item.id));
   selectedApprovalIds.value = selectedApprovalIds.value.filter((id) => pendingIds.has(id));
 }
@@ -751,7 +763,9 @@ onMounted(async () => {
 watch(view, async (name) => {
   if (name === "approvals" && user.value?.role === "admin") {
     if (!selectedKnowledge.value || selectedKnowledge.value.status !== "pending") {
-      selectedKnowledge.value = pendingKnowledge.value[0] || null;
+      const firstPending = pendingKnowledge.value[0] || null;
+      selectedKnowledge.value = firstPending;
+      if (firstPending) await openKnowledge(firstPending);
     }
   }
   if (name === "dashboard") {
@@ -847,7 +861,7 @@ onBeforeUnmount(() => {
                 </tbody>
               </table>
             </article>
-            <article v-if="selectedKnowledge" class="panel knowledge-detail"><div class="title-row"><div><h3>知识详情</h3><small>{{ selectedKnowledge.id }}</small></div><div class="actions"><template v-if="user.role==='admin'"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></template><button type="button" @click="selectedKnowledge=null">关闭</button></div></div><div class="evidence-grid"><div><b>标题</b><code>{{ selectedKnowledge.title }}</code></div><div><b>类型 / 状态</b><code>{{ label(selectedKnowledge.source_type) }} / {{ label(selectedKnowledge.status) }}</code></div><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>更新时间</b><code>{{ selectedKnowledge.updated_at?.slice(0,19).replace('T',' ') || '-' }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></article>
+            <article v-if="selectedKnowledge" class="panel knowledge-detail"><div class="title-row"><div><h3>知识详情</h3><small>{{ selectedKnowledge.id }}</small></div><div class="actions"><template v-if="user.role==='admin'"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></template><button type="button" @click="selectedKnowledge=null">关闭</button></div></div><div class="evidence-grid"><div><b>标题</b><code>{{ selectedKnowledge.title }}</code></div><div><b>类型 / 状态</b><code>{{ label(selectedKnowledge.source_type) }} / {{ label(selectedKnowledge.status) }}</code></div><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>更新时间</b><code>{{ selectedKnowledge.updated_at?.slice(0,19).replace('T',' ') || '-' }}</code></div></div><h4>内容预览</h4><p v-if="knowledgeDetailBusy===selectedKnowledge.id" class="action-message">正在加载知识详情...</p><pre v-else>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></article>
           </div>
         </template>
         <template v-else-if="view==='approvals' && user.role==='admin'">
@@ -882,7 +896,7 @@ onBeforeUnmount(() => {
                   </tbody>
                 </table>
               </article>
-              <article class="panel approval-detail"><template v-if="selectedKnowledge"><div class="title-row"><div><h3>{{ selectedKnowledge.title }}</h3><small>{{ label(selectedKnowledge.source_type) }} · {{ label(selectedKnowledge.status) }}</small></div><div class="actions"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></div></div><div class="evidence-grid"><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>版本</b><code>v{{ selectedKnowledge.version }}</code></div></div><h4>内容预览</h4><pre>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></template><p v-else class="empty-row">请选择左侧知识查看详情。</p></article>
+              <article class="panel approval-detail"><template v-if="selectedKnowledge"><div class="title-row"><div><h3>{{ selectedKnowledge.title }}</h3><small>{{ label(selectedKnowledge.source_type) }} · {{ label(selectedKnowledge.status) }}</small></div><div class="actions"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></div></div><div class="evidence-grid"><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>版本</b><code>v{{ selectedKnowledge.version }}</code></div></div><h4>内容预览</h4><p v-if="knowledgeDetailBusy===selectedKnowledge.id" class="action-message">正在加载知识详情...</p><pre v-else>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></template><p v-else class="empty-row">请选择左侧知识查看详情。</p></article>
             </div>
           </div>
         </template>

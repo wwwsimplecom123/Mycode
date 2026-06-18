@@ -302,14 +302,20 @@ class Database:
             return None
         try:
             if self._is_postgres:
-                row = self._fetchone("SELECT * FROM knowledge WHERE metadata->>'content_sha256' = ? ORDER BY created_at DESC LIMIT 1", [content_sha256])
+                row = self._fetchone(
+                    "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge WHERE metadata->>'content_sha256' = ? ORDER BY created_at DESC LIMIT 1",
+                    [content_sha256],
+                )
             else:
-                row = self._fetchone("SELECT * FROM knowledge WHERE json_extract(metadata, '$.content_sha256') = ? ORDER BY created_at DESC LIMIT 1", [content_sha256])
+                row = self._fetchone(
+                    "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge WHERE json_extract(metadata, '$.content_sha256') = ? ORDER BY created_at DESC LIMIT 1",
+                    [content_sha256],
+                )
             if row:
-                return self._decode_json_fields(row, ["metadata", "embedding"])
+                return self._decode_json_fields(row, ["metadata"])
         except Exception:
             pass
-        for item in self.list_knowledge():
+        for item in self.list_knowledge_summaries():
             if (item.get("metadata") or {}).get("content_sha256") == content_sha256:
                 return item
         return None
@@ -345,6 +351,17 @@ class Database:
     def list_knowledge(self) -> list[dict[str, Any]]:
         rows = self._fetchall("SELECT * FROM knowledge ORDER BY created_at DESC", [])
         return [self._decode_json_fields(row, ["metadata", "embedding"]) for row in rows]
+
+    def list_knowledge_summaries(self) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge ORDER BY created_at DESC",
+            [],
+        )
+        return [self._decode_json_fields(row, ["metadata"]) for row in rows]
+
+    def get_knowledge(self, item_id: str) -> dict[str, Any] | None:
+        row = self._fetchone("SELECT * FROM knowledge WHERE id = ?", [item_id])
+        return self._decode_json_fields(row, ["metadata", "embedding"]) if row else None
 
     def published_knowledge(self) -> list[dict[str, Any]]:
         rows = self._fetchall("SELECT * FROM knowledge WHERE status = 'published' ORDER BY updated_at DESC", [])

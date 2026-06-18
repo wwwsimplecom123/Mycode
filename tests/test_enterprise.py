@@ -322,6 +322,17 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(provider.embed_calls, 1)
         self.assertEqual(len(self.db.list_knowledge()), 1)
 
+    def test_knowledge_summaries_omit_large_content_and_embedding(self):
+        item = self.service.import_knowledge("OA phishing", "phishing_case", "password reset evil login")
+
+        summary = self.db.list_knowledge_summaries()[0]
+        detail = self.db.get_knowledge(item["id"])
+
+        self.assertNotIn("content", summary)
+        self.assertNotIn("generalized_content", summary)
+        self.assertNotIn("embedding", summary)
+        self.assertEqual(detail["content"], "password reset evil login")
+
     def test_feedback_creates_pending_review_knowledge_without_raw_body_in_audit(self):
         queued = self.service.ingest_eml("internal-phish.eml", SAMPLE_EML)
         result = self.service.feedback(queued["analysis_id"], "confirmed_phishing", "Confirmed by analyst")

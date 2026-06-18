@@ -319,13 +319,28 @@ class EnterpriseTests(unittest.TestCase):
         self.assertFalse(first["duplicate"])
         self.assertTrue(second["duplicate"])
         self.assertEqual(second["existing_id"], first["id"])
-        self.assertEqual(provider.embed_calls, 1)
+        self.assertEqual(provider.embed_calls, 0)
         self.assertEqual(len(self.db.list_knowledge()), 1)
+
+    def test_knowledge_embedding_runs_in_background_task(self):
+        provider = CountingProvider()
+        service = EnterpriseService(database=self.db, provider=provider)
+
+        item = service.import_knowledge("OA phishing", "phishing_case", "password reset evil login")
+        self.assertEqual(item["embedding_status"], "queued")
+        task = self.db.claim_knowledge_task("worker-test")
+        embedding = service.process_knowledge_embedding(task["knowledge_id"])
+        self.db.complete_knowledge_task(task["id"], task["knowledge_id"], embedding)
+        detail = self.db.get_knowledge(item["id"])
+
+        self.assertEqual(provider.embed_calls, 1)
+        self.assertEqual((detail["metadata"] or {}).get("embedding_status"), "completed")
+        self.assertTrue(detail["embedding"])
 
     def test_knowledge_summaries_omit_large_content_and_embedding(self):
         item = self.service.import_knowledge("OA phishing", "phishing_case", "password reset evil login")
 
-        summary = self.db.list_knowledge_summaries()[0]
+        summary = self.db.list_knowledge_summaries()["items"][0]
         detail = self.db.get_knowledge(item["id"])
 
         self.assertNotIn("content", summary)

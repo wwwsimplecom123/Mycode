@@ -152,16 +152,60 @@ class Database:
                 "UPDATE analyses SET status = ?, updated_at = ? WHERE id = ?",
                 ["running", utc_now(), task["analysis_id"]],
             )
+            task["task_type"] = "analysis"
+            return task
+
+    def queue_knowledge_embedding(self, knowledge_id: str) -> str:
+        task_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as connection:
+            self._insert(
+                connection,
+                "knowledge_tasks",
+                ["id", "knowledge_id", "status", "attempts", "available_at", "created_at", "updated_at"],
+                [task_id, knowledge_id, "queued", 0, now, now, now],
+            )
+        self.update_knowledge_metadata(knowledge_id, {"embedding_status": "queued", "embedding_error": ""})
+        return task_id
+
+    def claim_knowledge_task(self, worker_id: str) -> dict[str, Any] | None:
+        with self._lock, self.connect() as connection:
+            if self._is_postgres:
+                row = connection.execute(
+                    """
+                    SELECT * FROM knowledge_tasks
+                    WHERE status = 'queued' AND available_at <= NOW()
+                    ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
+                    """
+                ).fetchone()
+            else:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM knowledge_tasks WHERE status = 'queued' AND available_at <= ? ORDER BY created_at LIMIT 1",
+                    [utc_now()],
+                ).fetchone()
+            if not row:
+                return None
+            task = dict(row)
+            self._execute(
+                connection,
+                "UPDATE knowledge_tasks SET status = ?, worker_id = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?",
+                ["running", worker_id, utc_now(), task["id"]],
+            )
+            self._update_knowledge_metadata_on(connection, task["knowledge_id"], {"embedding_status": "running", "embedding_error": ""})
+            task["task_type"] = "knowledge_embedding"
             return task
 
     def recover_stale_tasks(self, timeout_seconds: int) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(60, timeout_seconds))).isoformat()
+        recovered = 0
         with self.connect() as connection:
             rows = self._fetchall_on(
                 connection,
                 "SELECT id, analysis_id FROM tasks WHERE status = ? AND updated_at < ?",
                 ["running", cutoff],
             )
+            recovered += len(rows)
             for row in rows:
                 self._execute(
                     connection,
@@ -173,7 +217,24 @@ class Database:
                     "UPDATE analyses SET status = ?, error = ?, updated_at = ? WHERE id = ?",
                     ["queued", "Recovered stale running task", utc_now(), row["analysis_id"]],
                 )
-        return len(rows)
+            knowledge_rows = self._fetchall_on(
+                connection,
+                "SELECT id, knowledge_id FROM knowledge_tasks WHERE status = ? AND updated_at < ?",
+                ["running", cutoff],
+            )
+            recovered += len(knowledge_rows)
+            for row in knowledge_rows:
+                self._execute(
+                    connection,
+                    "UPDATE knowledge_tasks SET status = ?, worker_id = NULL, available_at = ?, updated_at = ? WHERE id = ?",
+                    ["queued", utc_now(), utc_now(), row["id"]],
+                )
+                self._update_knowledge_metadata_on(
+                    connection,
+                    row["knowledge_id"],
+                    {"embedding_status": "queued", "embedding_error": "Recovered stale running task"},
+                )
+        return recovered
 
     def retry_analysis(self, analysis_id: str) -> bool:
         analysis = self.get_analysis(analysis_id)
@@ -204,6 +265,12 @@ class Database:
                 [status, result.get("risk_level", "low"), _json(result), utc_now(), analysis_id],
             )
 
+    def complete_knowledge_task(self, task_id: str, knowledge_id: str, embedding: list[float]) -> None:
+        with self.connect() as connection:
+            self._execute(connection, "UPDATE knowledge_tasks SET status = ?, updated_at = ? WHERE id = ?", ["completed", utc_now(), task_id])
+        self.update_knowledge(knowledge_id, embedding=embedding)
+        self.update_knowledge_metadata(knowledge_id, {"embedding_status": "completed", "embedding_error": ""})
+
     def fail_task(self, task: dict[str, Any], error: str, max_attempts: int) -> None:
         attempts = int(task.get("attempts") or 0) + 1
         terminal = attempts >= max_attempts
@@ -220,6 +287,24 @@ class Database:
                 connection,
                 "UPDATE analyses SET status = ?, error = ?, updated_at = ? WHERE id = ?",
                 [analysis_status, error[:1000], utc_now(), task["analysis_id"]],
+            )
+
+    def fail_knowledge_task(self, task: dict[str, Any], error: str, max_attempts: int) -> None:
+        attempts = int(task.get("attempts") or 0) + 1
+        terminal = attempts >= max_attempts
+        task_status = "dead" if terminal else "queued"
+        embedding_status = "failed" if terminal else "queued"
+        available = datetime.now(timezone.utc) + timedelta(seconds=min(300, 2**attempts))
+        with self.connect() as connection:
+            self._execute(
+                connection,
+                "UPDATE knowledge_tasks SET status = ?, last_error = ?, available_at = ?, updated_at = ? WHERE id = ?",
+                [task_status, error[:1000], available.isoformat(), utc_now(), task["id"]],
+            )
+            self._update_knowledge_metadata_on(
+                connection,
+                task["knowledge_id"],
+                {"embedding_status": embedding_status, "embedding_error": error[:1000]},
             )
 
     def record_worker_heartbeat(self, worker_id: str) -> None:
@@ -244,14 +329,15 @@ class Database:
         row = self._fetchone("SELECT * FROM analyses WHERE id = ?", [analysis_id])
         return self._decode_analysis(row) if row else None
 
-    def list_analyses(self, limit: int = 100) -> list[dict[str, Any]]:
-        rows = self._fetchall("SELECT * FROM analyses ORDER BY created_at DESC LIMIT ?", [min(limit, 500)])
+    def list_analyses(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        rows = self._fetchall("SELECT * FROM analyses ORDER BY created_at DESC LIMIT ? OFFSET ?", [min(limit, 500), max(offset, 0)])
         return [self._decode_analysis(row) for row in rows]
 
-    def list_analyses_for_actor(self, user_id: str = "", username: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    def list_analyses_for_actor(self, user_id: str = "", username: str = "", limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         rows = self._fetchall("SELECT * FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
         filtered = [item for item in (self._decode_analysis(row) for row in rows) if self._analysis_owned_by(item, user_id, username)]
-        return filtered[: min(limit, 500)]
+        offset = max(offset, 0)
+        return filtered[offset: offset + min(limit, 500)]
 
     def dashboard(self, user_id: str = "", username: str = "") -> dict[str, Any]:
         rows = self._fetchall("SELECT risk_level, status, created_at, parsed_message FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
@@ -273,6 +359,8 @@ class Database:
     def queue_stats(self) -> dict[str, Any]:
         rows = self._fetchall("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status", [])
         stats = {str(row.get("status")): int(row.get("count") or 0) for row in rows}
+        knowledge_rows = self._fetchall("SELECT status, COUNT(*) AS count FROM knowledge_tasks GROUP BY status", [])
+        knowledge_stats = {str(row.get("status")): int(row.get("count") or 0) for row in knowledge_rows}
         return {
             "queued": stats.get("queued", 0),
             "running": stats.get("running", 0),
@@ -280,6 +368,23 @@ class Database:
             "completed": stats.get("completed", 0) + stats.get("degraded", 0),
             "failed": stats.get("dead", 0),
             "by_status": stats,
+            "knowledge": {
+                "queued": knowledge_stats.get("queued", 0),
+                "running": knowledge_stats.get("running", 0),
+                "failed": knowledge_stats.get("dead", 0),
+                "completed": knowledge_stats.get("completed", 0),
+                "by_status": knowledge_stats,
+            },
+        }
+
+    def knowledge_stats(self) -> dict[str, int]:
+        rows = self._fetchall("SELECT status, COUNT(*) AS count FROM knowledge GROUP BY status", [])
+        stats = {str(row.get("status")): int(row.get("count") or 0) for row in rows}
+        return {
+            "total": sum(stats.values()),
+            "pending": stats.get("pending", 0),
+            "published": stats.get("published", 0),
+            "disabled": stats.get("disabled", 0),
         }
 
     def worker_heartbeats(self) -> list[dict[str, Any]]:
@@ -315,7 +420,7 @@ class Database:
                 return self._decode_json_fields(row, ["metadata"])
         except Exception:
             pass
-        for item in self.list_knowledge_summaries():
+        for item in self.list_knowledge_summaries(limit=5000).get("items", []):
             if (item.get("metadata") or {}).get("content_sha256") == content_sha256:
                 return item
         return None
@@ -331,6 +436,18 @@ class Database:
                     "UPDATE knowledge SET embedding_vector = ?::vector, updated_at = ? WHERE id = ?",
                     [vector, utc_now(), item_id],
                 )
+
+    def update_knowledge_metadata(self, item_id: str, updates: dict[str, Any]) -> None:
+        with self.connect() as connection:
+            self._update_knowledge_metadata_on(connection, item_id, updates)
+
+    def _update_knowledge_metadata_on(self, connection: Any, item_id: str, updates: dict[str, Any]) -> None:
+        row = self._fetchone_on(connection, "SELECT metadata FROM knowledge WHERE id = ?", [item_id])
+        if not row:
+            return
+        metadata = self._decode_json_fields(row, ["metadata"]).get("metadata") or {}
+        metadata.update(updates)
+        self._execute(connection, "UPDATE knowledge SET metadata = ?, updated_at = ? WHERE id = ?", [_json(metadata), utc_now(), item_id])
 
     def vector_knowledge(self, embedding: list[float], limit: int = 20) -> list[dict[str, Any]]:
         if not self._is_postgres or len(embedding) != 1024:
@@ -352,12 +469,33 @@ class Database:
         rows = self._fetchall("SELECT * FROM knowledge ORDER BY created_at DESC", [])
         return [self._decode_json_fields(row, ["metadata", "embedding"]) for row in rows]
 
-    def list_knowledge_summaries(self) -> list[dict[str, Any]]:
+    def list_knowledge_summaries(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: str = "",
+        source_type: str = "",
+        q: str = "",
+    ) -> dict[str, Any]:
+        where: list[str] = []
+        params: list[Any] = []
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if source_type:
+            where.append("source_type = ?")
+            params.append(source_type)
+        if q:
+            where.append("(LOWER(title) LIKE ? OR LOWER(metadata) LIKE ?)")
+            needle = f"%{q.lower()}%"
+            params.extend([needle, needle])
+        clause = "WHERE " + " AND ".join(where) if where else ""
+        total_row = self._fetchone(f"SELECT COUNT(*) AS count FROM knowledge {clause}", params)
         rows = self._fetchall(
-            "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge ORDER BY created_at DESC",
-            [],
+            f"SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            [*params, min(max(limit, 1), 200), max(offset, 0)],
         )
-        return [self._decode_json_fields(row, ["metadata"]) for row in rows]
+        return {"items": [self._decode_json_fields(row, ["metadata"]) for row in rows], "total": int((total_row or {}).get("count") or 0)}
 
     def get_knowledge(self, item_id: str) -> dict[str, Any] | None:
         row = self._fetchone("SELECT * FROM knowledge WHERE id = ?", [item_id])
@@ -376,16 +514,16 @@ class Database:
                 [str(uuid.uuid4()), actor, action, target, _json(details or {}), utc_now()],
             )
 
-    def list_audit(self, limit: int = 200, actor: str = "") -> list[dict[str, Any]]:
+    def list_audit(self, limit: int = 200, actor: str = "", offset: int = 0) -> list[dict[str, Any]]:
         params: list[Any] = []
         where = ""
         if actor:
             where = "WHERE actor = ?"
             params.append(actor)
-        params.append(min(limit, 1000))
+        params.extend([min(limit, 1000), max(offset, 0)])
         return [
             self._decode_json_fields(row, ["details"])
-            for row in self._fetchall(f"SELECT * FROM audit_logs {where} ORDER BY created_at DESC LIMIT ?", params)
+            for row in self._fetchall(f"SELECT * FROM audit_logs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?", params)
         ]
 
     def get_policy(self, key: str, default: Any = None) -> Any:
@@ -638,6 +776,11 @@ CREATE TABLE IF NOT EXISTS knowledge (
   content TEXT NOT NULL, generalized_content TEXT NOT NULL, metadata TEXT NOT NULL, embedding TEXT,
   version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS knowledge_tasks (
+  id TEXT PRIMARY KEY, knowledge_id TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+  worker_id TEXT, last_error TEXT, available_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_tasks_claim ON knowledge_tasks(status, available_at);
 CREATE TABLE IF NOT EXISTS policies (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
@@ -684,6 +827,12 @@ CREATE TABLE IF NOT EXISTS knowledge (
   embedding_vector vector(1024),
   version INTEGER NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
 );
+CREATE TABLE IF NOT EXISTS knowledge_tasks (
+  id UUID PRIMARY KEY, knowledge_id UUID NOT NULL REFERENCES knowledge(id), status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0, worker_id TEXT, last_error TEXT, available_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_tasks_claim ON knowledge_tasks(status, available_at);
 CREATE TABLE IF NOT EXISTS policies (key TEXT PRIMARY KEY, value JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,

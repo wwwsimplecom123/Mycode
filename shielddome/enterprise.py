@@ -276,15 +276,26 @@ class EnterpriseService:
                 "existing_id": item_id,
                 "embedding_status": "skipped_duplicate",
             }
-        self._sync_provider_secret()
         enriched_metadata = dict(metadata or {})
         enriched_metadata["content_sha256"] = content_hash
+        enriched_metadata["embedding_status"] = "queued"
+        enriched_metadata["embedding_error"] = ""
         item_id = self.db.add_knowledge(title, source_type, content, generalized, enriched_metadata)
-        embedded = self.provider.embed([generalized[:8000]])
-        if embedded.get("vectors"):
-            self.db.update_knowledge(item_id, embedding=embedded["vectors"][0])
-        self.db.record_audit("admin", "knowledge.imported", item_id, {"title": title, "source_type": source_type})
-        return {"id": item_id, "status": "pending", "duplicate": False, "embedding_status": embedded.get("status")}
+        self.db.queue_knowledge_embedding(item_id)
+        self.db.record_audit("admin", "knowledge.imported", item_id, {"title": title, "source_type": source_type, "embedding_status": "queued"})
+        return {"id": item_id, "status": "pending", "duplicate": False, "embedding_status": "queued"}
+
+    def process_knowledge_embedding(self, knowledge_id: str) -> list[float]:
+        self._sync_provider_secret()
+        item = self.db.get_knowledge(knowledge_id)
+        if not item:
+            raise KeyError(f"Unknown knowledge_id: {knowledge_id}")
+        result = self.provider.embed([str(item.get("generalized_content") or "")[:8000]])
+        vectors = result.get("vectors") or []
+        if not vectors:
+            raise RuntimeError(str(result.get("error") or "Embedding provider did not return a vector"))
+        self.db.record_audit("worker", "knowledge.embedding_completed", knowledge_id)
+        return vectors[0]
 
     def approve_knowledge(self, item_id: str) -> dict[str, Any]:
         self.db.update_knowledge(item_id, status="published")
@@ -297,18 +308,12 @@ class EnterpriseService:
         return {"id": item_id, "status": "disabled"}
 
     def reindex_knowledge(self) -> dict[str, Any]:
-        self._sync_provider_secret()
-        completed = 0
-        failed = 0
+        queued = 0
         for item in self.db.list_knowledge():
-            result = self.provider.embed([str(item.get("generalized_content") or "")[:8000]])
-            if result.get("vectors"):
-                self.db.update_knowledge(item["id"], embedding=result["vectors"][0])
-                completed += 1
-            else:
-                failed += 1
-        self.db.record_audit("admin", "knowledge.reindexed", "knowledge", {"completed": completed, "failed": failed})
-        return {"completed": completed, "failed": failed}
+            self.db.queue_knowledge_embedding(str(item["id"]))
+            queued += 1
+        self.db.record_audit("admin", "knowledge.reindex_queued", "knowledge", {"queued": queued})
+        return {"completed": 0, "failed": 0, "queued": queued}
 
     def configure_provider(self, values: dict[str, Any]) -> dict[str, Any]:
         allowed = {key: values[key] for key in ("chat_endpoint", "chat_model", "embedding_endpoint", "embedding_model", "timeout") if key in values}
@@ -452,13 +457,21 @@ class EnterpriseService:
                 ]
             )
             generalized = generalize_entities(content)["text"]
+            content_hash = hashlib.sha256(generalized.strip().encode("utf-8")).hexdigest()
             knowledge_id = self.db.add_knowledge(
                 f"SOC feedback {verdict} {analysis_id[:8]}",
                 source_type,
                 content,
                 generalized,
-                {"analysis_id": analysis_id, "verdict": verdict},
+                {
+                    "analysis_id": analysis_id,
+                    "verdict": verdict,
+                    "content_sha256": content_hash,
+                    "embedding_status": "queued",
+                    "embedding_error": "",
+                },
             )
+            self.db.queue_knowledge_embedding(knowledge_id)
         self.db.record_audit(
             "soc",
             "analysis.feedback",

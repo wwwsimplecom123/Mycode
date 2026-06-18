@@ -6,6 +6,9 @@ const view = ref("dashboard");
 const dashboard = ref({ total: 0, risk: {}, pending: 0, degraded: 0, trend: [] });
 const analyses = ref([]);
 const knowledge = ref([]);
+const knowledgeTotal = ref(0);
+const knowledgeGlobalStats = ref({ total: 0, pending: 0, published: 0, disabled: 0 });
+const knowledgeFilters = ref({ page: 1, limit: 50, q: "", status: "", source_type: "" });
 const selectedKnowledge = ref(null);
 const selectedApprovalIds = ref([]);
 const users = ref([]);
@@ -55,13 +58,14 @@ const filteredAnalyses = computed(() => {
   return analyses.value;
 });
 const knowledgeStats = computed(() => ({
-  total: knowledge.value.length,
-  pending: knowledge.value.filter((item) => item.status === "pending").length,
-  published: knowledge.value.filter((item) => item.status === "published").length,
-  disabled: knowledge.value.filter((item) => item.status === "disabled").length,
+  total: knowledgeGlobalStats.value.total || knowledgeTotal.value || knowledge.value.length,
+  pending: knowledgeGlobalStats.value.pending || 0,
+  published: knowledgeGlobalStats.value.published || 0,
+  disabled: knowledgeGlobalStats.value.disabled || 0,
 }));
 const pendingKnowledge = computed(() => knowledge.value.filter((item) => item.status === "pending"));
 const allPendingSelected = computed(() => pendingKnowledge.value.length > 0 && pendingKnowledge.value.every((item) => selectedApprovalIds.value.includes(item.id)));
+const knowledgePageCount = computed(() => Math.max(1, Math.ceil((knowledgeTotal.value || 0) / knowledgeFilters.value.limit)));
 const policyStats = computed(() => ({
   trustedDomains: policyLines(policyForm.value.trusted_domains).length,
   trustedIpRanges: policyLines(policyForm.value.trusted_ip_ranges).length,
@@ -105,7 +109,6 @@ const labels = {
   encrypted_database_error: "网页密钥解密失败",
   not_configured: "未配置",
   local_key_file: "本机受限主密钥",
-  completed: "已完成",
 };
 
 function label(value) {
@@ -157,15 +160,15 @@ async function refresh() {
   const results = await Promise.allSettled([
     api("/api/v1/dashboard"),
     api("/api/v1/analyses").then((x) => x.items),
-    api("/api/v1/knowledge").then((x) => x.items),
+    loadKnowledge(),
     api("/api/v1/settings/providers"),
     api("/api/v1/apps").then((x) => x.items),
     api("/api/v1/audit").then((x) => x.items),
     api("/api/v1/system/status"),
   ]);
-  const targets = [dashboard, analyses, knowledge, providers, applications, auditLogs, systemStatus];
+  const targets = [dashboard, analyses, null, providers, applications, auditLogs, systemStatus];
   results.forEach((result, index) => {
-    if (result.status === "fulfilled") targets[index].value = result.value;
+    if (result.status === "fulfilled" && targets[index]) targets[index].value = result.value;
   });
   const failed = results.filter((result) => result.status === "rejected").length;
   if (failed) serviceWarning.value = `${failed} 个模块暂时无法加载，登录会话仍保持有效。`;
@@ -183,6 +186,23 @@ async function refresh() {
   }
   await nextTick();
   renderChart();
+}
+
+async function loadKnowledge() {
+  const params = new URLSearchParams();
+  Object.entries(knowledgeFilters.value).forEach(([key, value]) => {
+    if (value !== "" && value !== null && value !== undefined) params.set(key, String(value));
+  });
+  const result = await api(`/api/v1/knowledge?${params.toString()}`);
+  knowledge.value = result.items || [];
+  knowledgeTotal.value = Number(result.total || 0);
+  knowledgeGlobalStats.value = result.stats || knowledgeGlobalStats.value;
+  return result;
+}
+
+async function applyKnowledgeFilters(resetPage = true) {
+  if (resetPage) knowledgeFilters.value.page = 1;
+  await loadKnowledge();
 }
 
 function startAutoRefresh() {
@@ -297,8 +317,8 @@ async function uploadKnowledge(event) {
     const success = files.length - duplicate - knowledgeImportProgress.value.failed;
     knowledgeMessage.value = knowledgeImportProgress.value.failed
       ? `批量导入完成：成功 ${success} 个，重复跳过 ${duplicate} 个，失败 ${knowledgeImportProgress.value.failed} 个。${failures.slice(0, 3).join("；")}`
-      : `批量导入完成：成功 ${success} 个，重复跳过 ${duplicate} 个。新知识已进入待审核，发布后才会参与后续深度检测。`;
-    await refresh();
+      : `批量导入完成：新增 ${success} 个，重复跳过 ${duplicate} 个。向量化已进入后台队列，发布后才会参与后续深度检测。`;
+    await loadKnowledge();
   } finally {
     knowledgeBusy.value = false;
   }
@@ -456,10 +476,10 @@ async function bulkKnowledgeAction(action) {
 async function reindexKnowledge() {
   if (!window.confirm("确定重建已导入知识的向量索引？该操作可能需要一些时间。")) return;
   knowledgeBusy.value = true;
-  knowledgeMessage.value = "正在重建知识向量索引...";
+    knowledgeMessage.value = "正在重建知识向量索引...";
   try {
     const result = await api("/api/v1/knowledge/reindex", { method: "POST" });
-    knowledgeMessage.value = `重建完成：成功 ${result.completed} 条，失败 ${result.failed} 条。`;
+    knowledgeMessage.value = `已加入后台向量化队列：${result.queued ?? result.completed} 条。可在系统状态查看 RAG 队列。`;
     await refresh();
   } catch (error) {
     knowledgeMessage.value = `重建失败：${readError(error)}`;
@@ -762,6 +782,9 @@ onMounted(async () => {
 
 watch(view, async (name) => {
   if (name === "approvals" && user.value?.role === "admin") {
+    knowledgeFilters.value.status = "pending";
+    knowledgeFilters.value.page = 1;
+    await loadKnowledge();
     if (!selectedKnowledge.value || selectedKnowledge.value.status !== "pending") {
       const firstPending = pendingKnowledge.value[0] || null;
       selectedKnowledge.value = firstPending;
@@ -838,15 +861,21 @@ onBeforeUnmount(() => {
             <p v-if="knowledgeMessage" class="action-message">{{ knowledgeMessage }}</p>
             <div v-if="knowledgeBusy && knowledgeImportProgress.total" class="knowledge-progress"><span :style="{width: `${Math.round((knowledgeImportProgress.done / knowledgeImportProgress.total) * 100)}%`}"></span><small>{{ knowledgeImportProgress.done }} / {{ knowledgeImportProgress.total }}</small></div>
             <article class="panel knowledge-list">
-              <div class="panel-heading"><h3>知识条目</h3><small>导入 .eml/.txt/.md/.csv/.pdf 后，先审核再发布</small></div>
+              <div class="panel-heading"><h3>知识条目</h3><small>共 {{ knowledgeTotal }} 条，当前第 {{ knowledgeFilters.page }} / {{ knowledgePageCount }} 页</small></div>
+              <div class="table-toolbar">
+                <input v-model.trim="knowledgeFilters.q" placeholder="搜索标题或文件名" @keyup.enter="applyKnowledgeFilters(true)">
+                <select v-model="knowledgeFilters.status" @change="applyKnowledgeFilters(true)"><option value="">全部状态</option><option value="pending">待审核</option><option value="published">已发布</option><option value="disabled">已停用</option></select>
+                <select v-model="knowledgeFilters.source_type" @change="applyKnowledgeFilters(true)"><option value="">全部类型</option><option value="phishing_case">钓鱼案例</option><option value="trusted_email">可信邮件</option><option value="security_rule">安全规则</option><option value="soc_review">SOC 结论</option></select>
+                <button type="button" @click="applyKnowledgeFilters(true)">筛选</button>
+              </div>
               <table>
-                <thead><tr><th>标题</th><th>类型</th><th>状态</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead>
+                <thead><tr><th>标题</th><th>类型</th><th>状态</th><th>向量</th><th>更新时间</th><th>操作</th></tr></thead>
                 <tbody>
                   <tr v-for="item in knowledge" :key="item.id" @click="openKnowledge(item)">
                     <td><b>{{ item.title }}</b><small class="subtext">{{ item.metadata?.filename || item.id }}</small></td>
                     <td>{{ label(item.source_type) }}</td>
                     <td><span :class="['status-pill', item.status === 'published' ? 'on' : 'off']">{{ label(item.status) }}</span></td>
-                    <td>v{{ item.version }}</td>
+                    <td><span :class="['status-pill', item.metadata?.embedding_status === 'completed' ? 'on' : 'off']">{{ label(item.metadata?.embedding_status || 'queued') }}</span></td>
                     <td>{{ item.updated_at?.slice(0,19).replace('T',' ') || '-' }}</td>
                     <td class="actions" @click.stop>
                       <button type="button" @click.stop="openKnowledge(item)">查看</button>
@@ -860,13 +889,14 @@ onBeforeUnmount(() => {
                   <tr v-if="!knowledge.length"><td colspan="6" class="empty-row">暂无知识。导入后会先进入待审核，发布后才会被深度检测检索。</td></tr>
                 </tbody>
               </table>
+              <div class="pagination"><button type="button" @click="knowledgeFilters.page=Math.max(1,knowledgeFilters.page-1);applyKnowledgeFilters(false)" :disabled="knowledgeFilters.page<=1">上一页</button><span>{{ knowledgeFilters.page }} / {{ knowledgePageCount }}</span><button type="button" @click="knowledgeFilters.page=Math.min(knowledgePageCount,knowledgeFilters.page+1);applyKnowledgeFilters(false)" :disabled="knowledgeFilters.page>=knowledgePageCount">下一页</button></div>
             </article>
             <article v-if="selectedKnowledge" class="panel knowledge-detail"><div class="title-row"><div><h3>知识详情</h3><small>{{ selectedKnowledge.id }}</small></div><div class="actions"><template v-if="user.role==='admin'"><button type="button" @click="approve(selectedKnowledge)" :disabled="selectedKnowledge.status==='published' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '发布' }}</button><button type="button" class="danger" @click="disableKnowledge(selectedKnowledge)" :disabled="selectedKnowledge.status==='disabled' || knowledgeActionId===selectedKnowledge.id || approvalBusy">{{ knowledgeActionId===selectedKnowledge.id ? '处理中' : '停用' }}</button></template><button type="button" @click="selectedKnowledge=null">关闭</button></div></div><div class="evidence-grid"><div><b>标题</b><code>{{ selectedKnowledge.title }}</code></div><div><b>类型 / 状态</b><code>{{ label(selectedKnowledge.source_type) }} / {{ label(selectedKnowledge.status) }}</code></div><div><b>来源文件</b><code>{{ selectedKnowledge.metadata?.filename || '-' }}</code></div><div><b>更新时间</b><code>{{ selectedKnowledge.updated_at?.slice(0,19).replace('T',' ') || '-' }}</code></div></div><h4>内容预览</h4><p v-if="knowledgeDetailBusy===selectedKnowledge.id" class="action-message">正在加载知识详情...</p><pre v-else>{{ knowledgePreview(selectedKnowledge) || '暂无可预览内容' }}</pre></article>
           </div>
         </template>
         <template v-else-if="view==='approvals' && user.role==='admin'">
           <div class="approval-page">
-            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><div class="approval-summary"><b>{{ pendingKnowledge.length }} 项待审核</b><small>已选择 {{ selectedApprovalIds.length }} 项</small></div></article>
+            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><div class="approval-summary"><b>{{ knowledgeStats.pending }} 项待审核</b><small>当前页已选择 {{ selectedApprovalIds.length }} 项</small></div></article>
             <div class="approval-grid">
               <article class="panel approval-list">
                 <div class="panel-heading">
@@ -1016,7 +1046,7 @@ onBeforeUnmount(() => {
         <template v-else-if="view==='system'">
           <div class="system-grid">
             <article class="panel"><h2>系统状态</h2><div class="evidence-grid"><div><b>服务</b><code>{{ systemStatus.service?.status || '-' }} v{{ systemStatus.service?.version || '-' }}</code></div><div><b>数据库</b><code>{{ systemStatus.database?.backend || '-' }} / {{ systemStatus.database?.status || '-' }}</code></div><div><b>pgvector</b><code>{{ systemStatus.database?.pgvector_expected ? '生产环境需要' : '本地 SQLite 不需要' }}</code></div><div><b>磁盘可用</b><code>{{ formatBytes(systemStatus.storage?.free_bytes) }} / {{ formatBytes(systemStatus.storage?.total_bytes) }}</code></div></div></article>
-            <article class="panel"><h2>任务队列</h2><div class="stats compact"><article class="stat-card"><small>排队</small><strong>{{ systemStatus.queue?.queued || 0 }}</strong></article><article class="stat-card"><small>运行中</small><strong>{{ systemStatus.queue?.running || 0 }}</strong></article><article class="stat-card"><small>失败</small><strong>{{ systemStatus.queue?.failed || 0 }}</strong></article><article class="stat-card"><small>已完成</small><strong>{{ systemStatus.queue?.completed || 0 }}</strong></article></div></article>
+            <article class="panel"><h2>任务队列</h2><div class="stats compact"><article class="stat-card"><small>邮件排队</small><strong>{{ systemStatus.queue?.queued || 0 }}</strong></article><article class="stat-card"><small>邮件运行</small><strong>{{ systemStatus.queue?.running || 0 }}</strong></article><article class="stat-card"><small>RAG 排队</small><strong>{{ systemStatus.queue?.knowledge?.queued || 0 }}</strong></article><article class="stat-card"><small>RAG 失败</small><strong>{{ systemStatus.queue?.knowledge?.failed || 0 }}</strong></article></div></article>
             <article class="panel"><h2>Worker 心跳</h2><table><thead><tr><th>Worker</th><th>最近心跳</th></tr></thead><tbody><tr v-for="item in systemStatus.workers" :key="item.worker_id"><td>{{ item.worker_id }}</td><td>{{ item.last_seen_at?.slice(0,19).replace('T',' ') }}</td></tr><tr v-if="!systemStatus.workers?.length"><td colspan="2" class="empty-row">暂无 Worker 心跳</td></tr></tbody></table></article>
             <article class="panel"><h2>模型配置</h2><div class="evidence-grid"><div><b>状态</b><code>{{ systemStatus.provider?.configured ? '已配置' : '未配置' }}</code></div><div><b>Chat</b><code>{{ systemStatus.provider?.chat_model || '-' }}</code></div><div><b>Embedding</b><code>{{ systemStatus.provider?.embedding_model || '-' }}</code></div><div><b>错误</b><code>{{ systemStatus.provider?.configuration_error || '-' }}</code></div></div></article>
           </div>

@@ -27,14 +27,22 @@ def run() -> None:
             service.recover_stale_tasks(SETTINGS.worker_stale_after_seconds)
             last_recovery = now
         task = service.db.claim_task(worker_id)
-        if not task:
+        if task:
+            try:
+                result, degraded = service.process_analysis(task["analysis_id"])
+                service.db.complete_task(task["id"], task["analysis_id"], result, degraded)
+            except Exception as exc:
+                service.db.fail_task(task, str(exc), SETTINGS.worker_max_attempts)
+            continue
+        knowledge_task = service.db.claim_knowledge_task(worker_id)
+        if not knowledge_task:
             time.sleep(SETTINGS.worker_poll_seconds)
             continue
         try:
-            result, degraded = service.process_analysis(task["analysis_id"])
-            service.db.complete_task(task["id"], task["analysis_id"], result, degraded)
+            embedding = service.process_knowledge_embedding(knowledge_task["knowledge_id"])
+            service.db.complete_knowledge_task(knowledge_task["id"], knowledge_task["knowledge_id"], embedding)
         except Exception as exc:
-            service.db.fail_task(task, str(exc), SETTINGS.worker_max_attempts)
+            service.db.fail_knowledge_task(knowledge_task, str(exc), SETTINGS.worker_max_attempts)
 
 
 if __name__ == "__main__":

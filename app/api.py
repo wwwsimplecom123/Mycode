@@ -405,10 +405,13 @@ async def analyze_message(file: UploadFile = File(...), actor: dict[str, Any] = 
 
 
 @app.get("/api/v1/analyses")
-def list_analyses(limit: int = 100, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def list_analyses(page: int = 1, limit: int = 100, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+    page = max(page, 1)
+    limit = min(max(limit, 1), 500)
+    offset = (page - 1) * limit
     if is_global_actor(actor):
-        return {"items": SERVICE.db.list_analyses(limit)}
-    return {"items": SERVICE.db.list_analyses_for_actor(str(actor.get("id") or ""), actor_username(actor), limit)}
+        return {"items": SERVICE.db.list_analyses(limit, offset), "page": page, "limit": limit}
+    return {"items": SERVICE.db.list_analyses_for_actor(str(actor.get("id") or ""), actor_username(actor), limit, offset), "page": page, "limit": limit}
 
 
 @app.get("/api/v1/analyses/{analysis_id}")
@@ -480,8 +483,23 @@ def import_knowledge_text(request: KnowledgeTextRequest, _actor: str = Depends(r
 
 
 @app.get("/api/v1/knowledge", dependencies=[Depends(require_console)])
-def list_knowledge() -> dict[str, Any]:
-    return {"items": SERVICE.db.list_knowledge_summaries()}
+def list_knowledge(
+    page: int = 1,
+    limit: int = 50,
+    status: str = "",
+    source_type: str = "",
+    q: str = "",
+) -> dict[str, Any]:
+    page = max(page, 1)
+    limit = min(max(limit, 1), 200)
+    result = SERVICE.db.list_knowledge_summaries(
+        limit=limit,
+        offset=(page - 1) * limit,
+        status=status,
+        source_type=source_type,
+        q=q.strip(),
+    )
+    return {**result, "page": page, "limit": limit, "stats": SERVICE.db.knowledge_stats()}
 
 
 @app.get("/api/v1/knowledge/{item_id}", dependencies=[Depends(require_console)])
@@ -594,10 +612,13 @@ def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_a
 
 
 @app.get("/api/v1/audit")
-def audit(limit: int = 200, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def audit(page: int = 1, limit: int = 200, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+    page = max(page, 1)
+    limit = min(max(limit, 1), 1000)
+    offset = (page - 1) * limit
     if is_global_actor(actor):
-        return {"items": SERVICE.db.list_audit(limit)}
-    return {"items": SERVICE.db.list_audit(limit, actor_username(actor))}
+        return {"items": SERVICE.db.list_audit(limit, offset=offset), "page": page, "limit": limit}
+    return {"items": SERVICE.db.list_audit(limit, actor_username(actor), offset), "page": page, "limit": limit}
 
 
 @app.get("/api/v1/system/status", dependencies=[Depends(require_console)])

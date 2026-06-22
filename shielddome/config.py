@@ -22,6 +22,8 @@ TRUSTED_IP_RANGES = {
     "fc00::/7",
 }
 
+TRUSTED_URLS: set[str] = set()
+
 BLACKLISTED_DOMAINS = {
     "evil-login.com",
     "phish.example",

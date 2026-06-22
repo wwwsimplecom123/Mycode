@@ -6,7 +6,7 @@ import ipaddress
 import re
 from email.utils import parseaddr
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunsplit
 
 from .config import TRUSTED_ROOT_DOMAINS
 
@@ -40,6 +40,29 @@ def normalize_domain(value: str | None) -> str:
         return host.encode("idna").decode("ascii")
     except UnicodeError:
         return host
+
+
+def normalize_web_url(value: str | None) -> str:
+    """Return a canonical HTTP(S) URL suitable for exact policy matching."""
+    raw = str(value or "").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return ""
+    host = normalize_domain(parsed.hostname)
+    if not host:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    netloc = host
+    if port and not ((parsed.scheme.lower() == "http" and port == 80) or (parsed.scheme.lower() == "https" and port == 443)):
+        netloc = f"{host}:{port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "/", parsed.query, ""))
+
+
+def is_trusted_url(value: str | None, trusted_urls: set[str] | None = None) -> bool:
+    return normalize_web_url(value) in (trusted_urls or set())
 
 
 def is_trusted_domain(domain: str, trusted_roots: set[str] | None = None, include_subdomains: bool = True) -> bool:
@@ -101,12 +124,14 @@ def structuralize_link(
     trusted_roots: set[str] | None = None,
     trusted_ip_ranges: list[str] | set[str] | None = None,
     trusted_include_subdomains: bool = True,
+    trusted_urls: set[str] | None = None,
 ) -> dict[str, Any]:
     display_text = str(link.get("display_text") or link.get("text") or "").strip()
     href = str(link.get("href") or link.get("url") or "").strip()
     context_before = str(link.get("context_before") or "")[-80:]
     context_after = str(link.get("context_after") or "")[:80]
     href_domain = normalize_domain(href)
+    trusted_url = is_trusted_url(href, trusted_urls)
     display_domain = infer_display_domain(display_text)
     is_web_link = is_valid_web_link(href)
     internal_network = is_web_link and is_internal_network_host(href_domain, trusted_ip_ranges)
@@ -120,7 +145,8 @@ def structuralize_link(
         "context_before": context_before,
         "context_after": context_after,
         "display_href_mismatch": mismatch,
-        "trusted_href": is_trusted_domain(href_domain, trusted_roots, trusted_include_subdomains) or internal_network,
+        "trusted_href": trusted_url or is_trusted_domain(href_domain, trusted_roots, trusted_include_subdomains) or internal_network,
+        "trusted_url": trusted_url,
         "is_web_link": is_web_link,
         "internal_network": internal_network,
         "html_snippet": str(link.get("html_snippet") or "")[:300],
@@ -132,5 +158,6 @@ def structuralize_links(
     trusted_roots: set[str] | None = None,
     trusted_ip_ranges: list[str] | set[str] | None = None,
     trusted_include_subdomains: bool = True,
+    trusted_urls: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    return [structuralize_link(link, trusted_roots, trusted_ip_ranges, trusted_include_subdomains) for link in links or []]
+    return [structuralize_link(link, trusted_roots, trusted_ip_ranges, trusted_include_subdomains, trusted_urls) for link in links or []]

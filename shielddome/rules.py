@@ -37,6 +37,7 @@ def analyze_quick(
     if "trusted_domains" in policy:
         trusted_domains = {str(value).lower() for value in policy["trusted_domains"]}
     trusted_ip_ranges = {str(value) for value in policy.get("trusted_ip_ranges", [])}
+    trusted_urls = {str(value) for value in policy.get("trusted_urls", [])}
     trusted_include_subdomains = bool(policy.get("trusted_include_subdomains", True))
     blacklisted_domains = (
         {str(value).lower() for value in policy["blacklisted_domains"]}
@@ -57,6 +58,7 @@ def analyze_quick(
         trusted_domains,
         trusted_ip_ranges,
         trusted_include_subdomains,
+        trusted_urls,
     )
     sender_domain = normalize_domain(sender)
     text_blob = " ".join(
@@ -139,6 +141,7 @@ def analyze_quick(
             "score_breakdown": score_breakdown,
             "policy_summary": {
                 "trusted_domains": len(trusted_domains or []),
+                "trusted_urls": len(trusted_urls),
                 "trusted_include_subdomains": trusted_include_subdomains,
                 "trusted_ip_ranges": len(trusted_ip_ranges),
                 "blacklisted_domains": len(blacklisted_domains),

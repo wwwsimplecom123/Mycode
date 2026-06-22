@@ -92,6 +92,29 @@ class ShieldDomeAnalyzerTests(unittest.TestCase):
         self.assertTrue(link["display_href_mismatch"])
         self.assertFalse(link["trusted_href"])
 
+    def test_trusted_url_policy_matches_only_the_exact_url(self):
+        policy = {
+            "trusted_domains": [],
+            "trusted_urls": ["https://portal.example/login?source=mail"],
+            "trusted_ip_ranges": [],
+            "blacklisted_domains": [],
+            "high_risk_keywords": [],
+            "risk_thresholds": {"medium": 35, "high": 65, "critical": 85},
+        }
+        trusted = analyze_quick(
+            {"links": [{"href": "https://portal.example/login?source=mail", "display_text": "portal"}]},
+            policy=policy,
+        )
+        different_path = analyze_quick(
+            {"links": [{"href": "https://portal.example/admin", "display_text": "portal"}]},
+            policy=policy,
+        )
+
+        self.assertTrue(trusted["evidence"]["links"][0]["trusted_url"])
+        self.assertNotIn("external_link", trusted["matched_rules"])
+        self.assertFalse(different_path["evidence"]["links"][0]["trusted_url"])
+        self.assertIn("external_link", different_path["matched_rules"])
+
     def test_deep_analysis_does_not_raise_semantic_anomaly_above_medium_without_strong_rule(self):
         service = AnalyzerService(deep_delay_seconds=0)
         quick = service.quick_analyze(

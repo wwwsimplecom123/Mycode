@@ -16,7 +16,7 @@ from .analyzer import calibrate_score, level_and_action
 from .auth import AuthService
 from .entities import generalize_entities, sanitize_model_value
 from .mail_parser import parse_eml
-from .links import normalize_domain
+from .links import normalize_domain, normalize_web_url
 from .providers import SiliconFlowProvider
 from .raw_store import RawStore
 from .rules import analyze_quick
@@ -357,6 +357,7 @@ class EnterpriseService:
     def detection_policy(self) -> dict[str, Any]:
         return {
             "trusted_domains": self.db.get_policy("trusted_domains", []) or [],
+            "trusted_urls": self.db.get_policy("trusted_urls", []) or [],
             "trusted_ip_ranges": self.db.get_policy("trusted_ip_ranges", []) or [],
             "blacklisted_domains": self.db.get_policy("blacklisted_domains", []) or [],
             "high_risk_keywords": self.db.get_policy("high_risk_keywords", []) or [],
@@ -367,6 +368,7 @@ class EnterpriseService:
     def configure_detection_policy(self, values: dict[str, Any], actor: str = "admin") -> dict[str, Any]:
         policy = {
             "trusted_domains": self._validated_domains(values.get("trusted_domains"), "可信域名"),
+            "trusted_urls": self._validated_urls(values.get("trusted_urls", [])),
             "trusted_ip_ranges": self._validated_ip_ranges(values.get("trusted_ip_ranges")),
             "blacklisted_domains": self._validated_domains(values.get("blacklisted_domains"), "黑名单域名"),
             "high_risk_keywords": self._validated_keywords(values.get("high_risk_keywords")),
@@ -593,6 +595,17 @@ class EnterpriseService:
             result.add(normalized)
         if len(result) > 5000:
             raise ValueError(f"{label}最多允许 5000 项")
+        return sorted(result)
+
+    @staticmethod
+    def _validated_urls(values: Any) -> list[str]:
+        if not isinstance(values, list):
+            raise ValueError("可信 URL 必须是列表")
+        result = {normalize_web_url(str(value)) for value in values if str(value).strip()}
+        if "" in result:
+            raise ValueError("可信 URL 必须是完整的 http:// 或 https:// 地址")
+        if len(result) > 5000:
+            raise ValueError("可信 URL 最多允许 5000 项")
         return sorted(result)
 
     @staticmethod

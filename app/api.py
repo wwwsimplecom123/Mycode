@@ -83,6 +83,7 @@ class PolicyRequest(BaseModel):
 
 class DetectionPolicyRequest(BaseModel):
     trusted_domains: list[str]
+    trusted_urls: list[str] = []
     trusted_ip_ranges: list[str]
     blacklisted_domains: list[str]
     high_risk_keywords: list[str]
@@ -599,6 +600,7 @@ def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_a
     protected = {
         "provider_secret",
         "trusted_domains",
+        "trusted_urls",
         "trusted_ip_ranges",
         "blacklisted_domains",
         "high_risk_keywords",

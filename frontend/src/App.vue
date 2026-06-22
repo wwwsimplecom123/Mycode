@@ -32,8 +32,8 @@ const providers = ref({ chat_endpoint: "", chat_model: "", embedding_endpoint: "
 const providerKey = ref("");
 const providerMessage = ref("");
 const providerBusy = ref(false);
-const detectionPolicy = ref({ trusted_domains: [], trusted_ip_ranges: [], blacklisted_domains: [], high_risk_keywords: [], risk_thresholds: { medium: 35, high: 65, critical: 85 }, trusted_include_subdomains: true });
-const policyForm = ref({ trusted_domains: "", trusted_ip_ranges: "", blacklisted_domains: "", high_risk_keywords: "", medium: 35, high: 65, critical: 85, trusted_include_subdomains: true });
+const detectionPolicy = ref({ trusted_domains: [], trusted_urls: [], trusted_ip_ranges: [], blacklisted_domains: [], high_risk_keywords: [], risk_thresholds: { medium: 35, high: 65, critical: 85 }, trusted_include_subdomains: true });
+const policyForm = ref({ trusted_domains: "", trusted_urls: "", trusted_ip_ranges: "", blacklisted_domains: "", high_risk_keywords: "", medium: 35, high: 65, critical: 85, trusted_include_subdomains: true });
 const policyMessage = ref("");
 const policyBusy = ref(false);
 const token = ref("");
@@ -68,6 +68,7 @@ const allPendingSelected = computed(() => knowledgeStats.value.pending > 0 && se
 const knowledgePageCount = computed(() => Math.max(1, Math.ceil((knowledgeTotal.value || 0) / knowledgeFilters.value.limit)));
 const policyStats = computed(() => ({
   trustedDomains: policyLines(policyForm.value.trusted_domains).length,
+  trustedUrls: policyLines(policyForm.value.trusted_urls).length,
   trustedIpRanges: policyLines(policyForm.value.trusted_ip_ranges).length,
   blacklistedDomains: policyLines(policyForm.value.blacklisted_domains).length,
   keywords: policyLines(policyForm.value.high_risk_keywords).length,
@@ -561,6 +562,7 @@ function setPolicyForm(policy) {
   detectionPolicy.value = policy;
   policyForm.value = {
     trusted_domains: (policy.trusted_domains || []).join("\n"),
+    trusted_urls: (policy.trusted_urls || []).join("\n"),
     trusted_ip_ranges: (policy.trusted_ip_ranges || []).join("\n"),
     blacklisted_domains: (policy.blacklisted_domains || []).join("\n"),
     high_risk_keywords: (policy.high_risk_keywords || []).join("\n"),
@@ -584,6 +586,7 @@ async function saveDetectionPolicy() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         trusted_domains: policyLines(policyForm.value.trusted_domains),
+        trusted_urls: policyLines(policyForm.value.trusted_urls),
         trusted_ip_ranges: policyLines(policyForm.value.trusted_ip_ranges),
         blacklisted_domains: policyLines(policyForm.value.blacklisted_domains),
         high_risk_keywords: policyLines(policyForm.value.high_risk_keywords),
@@ -1023,6 +1026,7 @@ onBeforeUnmount(() => {
             <p v-if="policyMessage" class="action-message">{{ policyMessage }}</p>
             <div class="policy-summary">
               <div><small>可信域名</small><b>{{ policyStats.trustedDomains }}</b></div>
+              <div><small>可信 URL</small><b>{{ policyStats.trustedUrls }}</b></div>
               <div><small>可信 IP/CIDR</small><b>{{ policyStats.trustedIpRanges }}</b></div>
               <div><small>黑名单域名</small><b>{{ policyStats.blacklistedDomains }}</b></div>
               <div><small>高风险关键词</small><b>{{ policyStats.keywords }}</b></div>
@@ -1034,6 +1038,11 @@ onBeforeUnmount(() => {
                 <textarea v-model="policyForm.trusted_domains" rows="9" spellcheck="false" placeholder="company.com&#10;mail.company.com"></textarea>
                 <label class="checkbox-line"><input v-model="policyForm.trusted_include_subdomains" type="checkbox"> 子域名继承可信</label>
                 <small>{{ policyLines(policyForm.trusted_domains).length }} 项</small>
+              </article>
+              <article class="panel policy-card">
+                <div class="policy-card-head"><span class="policy-kind trust">精确</span><div><h3>可信 URL 白名单</h3><p>每行一个完整 HTTP(S) URL，仅匹配相同协议、主机、路径和查询参数，不会放行整个域名。</p></div></div>
+                <textarea v-model="policyForm.trusted_urls" rows="9" spellcheck="false" placeholder="https://portal.company.com/login&#10;https://sso.company.com/reset?source=mail"></textarea>
+                <small>{{ policyLines(policyForm.trusted_urls).length }} 项</small>
               </article>
               <article class="panel policy-card">
                 <div class="policy-card-head"><span class="policy-kind trust">放行</span><div><h3>可信 IP / CIDR</h3><p>仅这里配置的 IP 或网段会被视为内部可信地址。</p></div></div>

@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterator
 
-from .config import BLACKLISTED_DOMAINS, HIGH_RISK_KEYWORDS, RISK_THRESHOLDS, TRUSTED_IP_RANGES, TRUSTED_ROOT_DOMAINS
+from .config import BLACKLISTED_DOMAINS, HIGH_RISK_KEYWORDS, RISK_THRESHOLDS, TRUSTED_IP_RANGES, TRUSTED_ROOT_DOMAINS, TRUSTED_URLS
 from .settings import SETTINGS
 
 
@@ -95,6 +95,7 @@ class Database:
     def seed_default_policies(self) -> None:
         defaults = [
             ("trusted_domains", sorted(TRUSTED_ROOT_DOMAINS)),
+            ("trusted_urls", sorted(TRUSTED_URLS)),
             ("trusted_ip_ranges", sorted(TRUSTED_IP_RANGES)),
             ("blacklisted_domains", sorted(BLACKLISTED_DOMAINS)),
             ("high_risk_keywords", sorted(HIGH_RISK_KEYWORDS)),

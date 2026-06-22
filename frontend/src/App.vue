@@ -64,7 +64,7 @@ const knowledgeStats = computed(() => ({
   disabled: knowledgeGlobalStats.value.disabled || 0,
 }));
 const pendingKnowledge = computed(() => knowledge.value.filter((item) => item.status === "pending"));
-const allPendingSelected = computed(() => pendingKnowledge.value.length > 0 && pendingKnowledge.value.every((item) => selectedApprovalIds.value.includes(item.id)));
+const allPendingSelected = computed(() => knowledgeStats.value.pending > 0 && selectedApprovalIds.value.length === knowledgeStats.value.pending);
 const knowledgePageCount = computed(() => Math.max(1, Math.ceil((knowledgeTotal.value || 0) / knowledgeFilters.value.limit)));
 const policyStats = computed(() => ({
   trustedDomains: policyLines(policyForm.value.trusted_domains).length,
@@ -400,8 +400,36 @@ function toggleApprovalSelection(item) {
     : [...selectedApprovalIds.value, item.id];
 }
 
-function toggleAllPendingApprovals() {
-  selectedApprovalIds.value = allPendingSelected.value ? [] : pendingKnowledge.value.map((item) => item.id);
+async function loadAllPendingApprovalIds() {
+  const ids = [];
+  const limit = 200;
+  let page = 1;
+  let total = 0;
+  do {
+    const result = await api(`/api/v1/knowledge?page=${page}&limit=${limit}&status=pending`);
+    ids.push(...(result.items || []).map((item) => item.id).filter(Boolean));
+    total = Number(result.total || 0);
+    page += 1;
+  } while (ids.length < total);
+  return [...new Set(ids)];
+}
+
+async function toggleAllPendingApprovals() {
+  if (approvalBusy.value) return;
+  if (allPendingSelected.value) {
+    selectedApprovalIds.value = [];
+    return;
+  }
+  approvalBusy.value = true;
+  knowledgeMessage.value = "正在加载全部待审批知识...";
+  try {
+    selectedApprovalIds.value = await loadAllPendingApprovalIds();
+    knowledgeMessage.value = `已选择全部 ${selectedApprovalIds.value.length} 条待审批知识。`;
+  } catch (error) {
+    knowledgeMessage.value = `加载待审批知识失败：${readError(error)}`;
+  } finally {
+    approvalBusy.value = false;
+  }
 }
 
 function knowledgePreview(item) {
@@ -456,14 +484,19 @@ async function bulkKnowledgeAction(action) {
   approvalBusy.value = true;
   knowledgeMessage.value = `正在批量${text} ${ids.length} 条知识...`;
   try {
-    const result = await api(`/api/v1/knowledge/bulk-${isApprove ? "approve" : "disable"}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
-    knowledgeMessage.value = result.failed?.length
-      ? `批量${text}完成：成功 ${result.completed} 条，失败 ${result.failed.length} 条。`
-      : `批量${text}完成：成功 ${result.completed} 条。`;
+    const results = [];
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      results.push(await api(`/api/v1/knowledge/bulk-${isApprove ? "approve" : "disable"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids.slice(offset, offset + 500) }),
+      }));
+    }
+    const completed = results.reduce((total, result) => total + Number(result.completed || 0), 0);
+    const failed = results.flatMap((result) => result.failed || []);
+    knowledgeMessage.value = failed.length
+      ? `批量${text}完成：成功 ${completed} 条，失败 ${failed.length} 条。`
+      : `批量${text}完成：成功 ${completed} 条。`;
     selectedApprovalIds.value = [];
     await refreshAndKeepKnowledge();
   } catch (error) {
@@ -896,7 +929,7 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="view==='approvals' && user.role==='admin'">
           <div class="approval-page">
-            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><div class="approval-summary"><b>{{ knowledgeStats.pending }} 项待审核</b><small>当前页已选择 {{ selectedApprovalIds.length }} 项</small></div></article>
+            <article class="panel approval-heading"><div><h2>审批中心</h2><p>集中审核待发布知识。发布后才会进入 RAG 检索，停用后不会参与后续检测。</p></div><div class="approval-summary"><b>{{ knowledgeStats.pending }} 项待审核</b><small>已选择 {{ selectedApprovalIds.length }} 项</small></div></article>
             <div class="approval-grid">
               <article class="panel approval-list">
                 <div class="panel-heading">

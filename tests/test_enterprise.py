@@ -322,6 +322,22 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(provider.embed_calls, 0)
         self.assertEqual(len(self.db.list_knowledge()), 1)
 
+    def test_knowledge_dedup_keeps_distinct_raw_evidence_after_generalization(self):
+        first = self.service.import_knowledge(
+            "Password reset notice",
+            "phishing_case",
+            "Contact Alice at alice@partner.example token alpha-1111 phone 13800138000",
+        )
+        second = self.service.import_knowledge(
+            "Password reset notice",
+            "phishing_case",
+            "Contact Bob at bob@partner.example token beta-2222 phone 13900139000",
+        )
+
+        self.assertFalse(first["duplicate"])
+        self.assertFalse(second["duplicate"])
+        self.assertEqual(len(self.db.list_knowledge()), 2)
+
     def test_knowledge_embedding_runs_in_background_task(self):
         provider = CountingProvider()
         service = EnterpriseService(database=self.db, provider=provider)

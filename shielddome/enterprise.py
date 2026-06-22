@@ -7,6 +7,7 @@ import ipaddress
 import json
 import re
 import shutil
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,14 @@ from .rules import analyze_quick
 from .secret_store import EncryptedSecretStore
 from .settings import SETTINGS
 from .storage import Database
+
+
+def knowledge_content_fingerprint(source_type: str, content: str) -> str:
+    """Create a stable deduplication key without losing security evidence."""
+    normalized = unicodedata.normalize("NFC", content or "")
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = "\n".join(line.rstrip() for line in normalized.split("\n")).strip()
+    return hashlib.sha256(f"{source_type}\n{normalized}".encode("utf-8")).hexdigest()
 
 
 class EnterpriseService:
@@ -259,8 +268,8 @@ class EnterpriseService:
         if source_type not in {"trusted_email", "phishing_case", "security_rule", "soc_review"}:
             raise ValueError("Unsupported knowledge source_type")
         generalized = generalize_entities(content)["text"]
-        content_hash = hashlib.sha256(generalized.strip().encode("utf-8")).hexdigest()
-        existing = self.db.find_knowledge_by_content_hash(content_hash)
+        content_hash = knowledge_content_fingerprint(source_type, content)
+        existing = self.db.find_knowledge_by_raw_content_hash(content_hash)
         if existing:
             item_id = str(existing.get("id") or "")
             self.db.record_audit(
@@ -277,7 +286,7 @@ class EnterpriseService:
                 "embedding_status": "skipped_duplicate",
             }
         enriched_metadata = dict(metadata or {})
-        enriched_metadata["content_sha256"] = content_hash
+        enriched_metadata["raw_content_sha256"] = content_hash
         enriched_metadata["embedding_status"] = "queued"
         enriched_metadata["embedding_error"] = ""
         item_id = self.db.add_knowledge(title, source_type, content, generalized, enriched_metadata)
@@ -457,7 +466,7 @@ class EnterpriseService:
                 ]
             )
             generalized = generalize_entities(content)["text"]
-            content_hash = hashlib.sha256(generalized.strip().encode("utf-8")).hexdigest()
+            content_hash = knowledge_content_fingerprint(source_type, content)
             knowledge_id = self.db.add_knowledge(
                 f"SOC feedback {verdict} {analysis_id[:8]}",
                 source_type,
@@ -466,7 +475,7 @@ class EnterpriseService:
                 {
                     "analysis_id": analysis_id,
                     "verdict": verdict,
-                    "content_sha256": content_hash,
+                    "raw_content_sha256": content_hash,
                     "embedding_status": "queued",
                     "embedding_error": "",
                 },

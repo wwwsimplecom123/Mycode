@@ -402,18 +402,18 @@ class Database:
             )
         return item_id
 
-    def find_knowledge_by_content_hash(self, content_sha256: str) -> dict[str, Any] | None:
+    def find_knowledge_by_raw_content_hash(self, content_sha256: str) -> dict[str, Any] | None:
         if not content_sha256:
             return None
         try:
             if self._is_postgres:
                 row = self._fetchone(
-                    "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge WHERE metadata->>'content_sha256' = ? ORDER BY created_at DESC LIMIT 1",
+                    "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge WHERE metadata->>'raw_content_sha256' = ? ORDER BY created_at DESC LIMIT 1",
                     [content_sha256],
                 )
             else:
                 row = self._fetchone(
-                    "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge WHERE json_extract(metadata, '$.content_sha256') = ? ORDER BY created_at DESC LIMIT 1",
+                    "SELECT id, title, source_type, status, metadata, version, created_at, updated_at FROM knowledge WHERE json_extract(metadata, '$.raw_content_sha256') = ? ORDER BY created_at DESC LIMIT 1",
                     [content_sha256],
                 )
             if row:
@@ -421,7 +421,7 @@ class Database:
         except Exception:
             pass
         for item in self.list_knowledge_summaries(limit=5000).get("items", []):
-            if (item.get("metadata") or {}).get("content_sha256") == content_sha256:
+            if (item.get("metadata") or {}).get("raw_content_sha256") == content_sha256:
                 return item
         return None
 

@@ -340,6 +340,34 @@ function evidenceRules() {
   return evidenceSource().quick_result?.matched_rules || evidenceSource().matched_rules || [];
 }
 
+function selectedMail() {
+  return selected.value?.parsed_message || {};
+}
+
+function auditActionLabel(action) {
+  const labels = {
+    "knowledge.imported": "导入知识",
+    "knowledge.duplicate_skipped": "跳过重复知识",
+    "knowledge.published": "发布知识",
+    "knowledge.disabled": "停用知识",
+    "knowledge.reindex_queued": "重建知识索引",
+    "analysis.created": "创建邮件检测",
+    "analysis.completed": "完成邮件检测",
+    "analysis.feedback": "提交检测反馈",
+    "application.downloaded": "下载应用",
+  };
+  return labels[action] || action?.replaceAll(".", " / ") || "系统操作";
+}
+
+function auditDescription(item) {
+  const details = item?.details || {};
+  if (details.title) return `知识：${details.title}`;
+  if (details.risk_level) return `风险等级：${label(details.risk_level)}`;
+  if (details.verdict) return `反馈结论：${label(details.verdict)}`;
+  if (details.filename) return `文件：${details.filename}`;
+  return item?.target ? `对象：${item.target}` : "查看字段了解完整上下文";
+}
+
 async function retrySelectedAnalysis() {
   if (!selected.value?.id) return;
   const analysisId = selected.value.id;
@@ -388,6 +416,14 @@ async function openKnowledge(item) {
   } finally {
     knowledgeDetailBusy.value = "";
   }
+}
+
+async function toggleKnowledgeDetail(item) {
+  if (selectedKnowledge.value?.id === item?.id) {
+    selectedKnowledge.value = null;
+    return;
+  }
+  await openKnowledge(item);
 }
 
 function isApprovalSelected(item) {
@@ -875,6 +911,21 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="view==='events' || view==='internal'">
           <div class="grid events"><article class="panel"><div class="event-heading"><div><h3>{{ eventFilter.label }}</h3><small>共 {{ filteredAnalyses.length }} 条结果</small></div><button v-if="eventFilter.type!=='all'" @click="clearEventFilter">清除筛选</button></div><table><thead><tr><th>时间</th><th>来源</th><th>状态</th><th>风险</th></tr></thead><tbody><tr v-for="item in filteredAnalyses" :key="item.id" @click="openAnalysis(item)"><td>{{ item.created_at?.slice(0,19) }}</td><td>{{ item.source_name }}</td><td>{{ label(item.status) }}</td><td><span :class="'tag '+item.risk_level">{{ label(item.risk_level) }}</span></td></tr><tr v-if="!filteredAnalyses.length"><td colspan="4" class="empty-row">当前筛选条件下暂无事件</td></tr></tbody></table></article><article class="panel detail"><div class="title-row"><div><h3>检测详情</h3><small>{{ selected?.id || '请选择左侧事件' }}</small></div><button v-if="selected && ['failed','degraded'].includes(selected.status)" @click="retrySelectedAnalysis">重新分析</button></div><p v-if="actionMessage" class="action-message">{{ actionMessage }}</p><template v-if="selected"><div class="detail-summary"><span :class="'tag '+selected.risk_level">{{ label(selected.risk_level) }}</span><b>{{ label(selected.status) }}</b><small>{{ selected.source_name }}</small></div><section class="evidence-block"><h4>判定依据</h4><p>{{ evidenceSource().reason || selected.quick_result?.reason || '暂无解释' }}</p><div class="evidence-grid"><div><b>命中规则</b><code>{{ evidenceRules().join(', ') || '-' }}</code></div><div><b>认证结果</b><code>{{ JSON.stringify(evidenceSource().authentication || selected.parsed_message?.authentication || {}) }}</code></div><div><b>模型状态</b><code>{{ evidenceSource().llm?.status || '-' }} {{ evidenceSource().llm?.error_type || '' }}</code></div><div><b>RAG 引用</b><code>{{ evidenceSource().rag?.references?.length || 0 }} 条</code></div></div><h4>链接风险</h4><table><thead><tr><th>显示域名</th><th>真实域名</th><th>错配</th><th>可信</th></tr></thead><tbody><tr v-for="(link,index) in evidenceLinks().slice(0,8)" :key="index"><td>{{ link.display_domain || '-' }}</td><td>{{ link.href_domain || '-' }}</td><td>{{ link.display_href_mismatch ? '是' : '否' }}</td><td>{{ link.trusted_href ? '是' : '否' }}</td></tr><tr v-if="!evidenceLinks().length"><td colspan="4" class="empty-row">暂无链接证据</td></tr></tbody></table><div class="settings-actions"><button @click="submitFeedback('false_positive')">标记误报</button><button @click="submitFeedback('confirmed_phishing')">确认钓鱼</button><button @click="submitFeedback('uncertain')">标记不确定</button></div></section><details><summary>原始 JSON</summary><pre>{{ JSON.stringify(selected || {}, null, 2) }}</pre></details></template><p v-else class="empty-row">请选择一条邮件事件查看详情</p></article></div>
+          <article v-if="selected" class="panel event-inspector">
+            <div class="title-row"><div><h3>邮件完整信息</h3><small>用于复核检测结论的原始解析字段</small></div><span :class="'tag '+selected.risk_level">{{ label(selected.risk_level) }}</span></div>
+            <div class="mail-facts">
+              <div><small>邮件主题</small><b>{{ selectedMail().subject || '-' }}</b></div>
+              <div><small>发件人</small><b>{{ selectedMail().sender || '-' }}</b></div>
+              <div><small>收件人</small><b>{{ selectedMail().recipients?.join(', ') || '-' }}</b></div>
+              <div><small>回复地址</small><b>{{ selectedMail().reply_to || '-' }}</b></div>
+              <div><small>邮件时间</small><b>{{ selectedMail().date || selected.created_at?.slice(0,19) || '-' }}</b></div>
+              <div><small>附件数量</small><b>{{ selectedMail().attachments?.length || 0 }} 个</b></div>
+            </div>
+            <div class="mail-review-grid">
+              <section><h4>邮件摘要</h4><pre>{{ selectedMail().body_summary || '暂无正文摘要' }}</pre></section>
+              <section><h4>附件风险</h4><ul v-if="selectedMail().attachments?.length"><li v-for="file in selectedMail().attachments" :key="file.sha256 || file.filename"><b>{{ file.filename }}</b><span>{{ file.size || 0 }} B · {{ file.indicators?.join(', ') || '未发现高风险特征' }}</span></li></ul><p v-else>未检测到附件。</p></section>
+            </div>
+          </article>
         </template>
         <template v-else-if="view==='knowledge'">
           <div class="knowledge-page">
@@ -904,14 +955,14 @@ onBeforeUnmount(() => {
               <table>
                 <thead><tr><th>标题</th><th>类型</th><th>状态</th><th>向量</th><th>更新时间</th><th>操作</th></tr></thead>
                 <tbody>
-                  <tr v-for="item in knowledge" :key="item.id" @click="openKnowledge(item)">
+                  <tr v-for="item in knowledge" :key="item.id" @click="toggleKnowledgeDetail(item)">
                     <td><b>{{ item.title }}</b><small class="subtext">{{ item.metadata?.filename || item.id }}</small></td>
                     <td>{{ label(item.source_type) }}</td>
                     <td><span :class="['status-pill', item.status === 'published' ? 'on' : 'off']">{{ label(item.status) }}</span></td>
                     <td><span :class="['status-pill', item.metadata?.embedding_status === 'completed' ? 'on' : 'off']">{{ label(item.metadata?.embedding_status || 'queued') }}</span></td>
                     <td>{{ item.updated_at?.slice(0,19).replace('T',' ') || '-' }}</td>
                     <td class="actions" @click.stop>
-                      <button type="button" @click.stop="openKnowledge(item)">查看</button>
+                      <button type="button" class="detail-trigger" @click.stop="toggleKnowledgeDetail(item)">{{ selectedKnowledge?.id === item.id ? '收起详情' : '查看详情' }}</button>
                       <template v-if="user.role==='admin'">
                         <button type="button" @click.stop="approve(item)" :disabled="item.status==='published' || knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '发布' }}</button>
                         <button type="button" class="danger" @click.stop="disableKnowledge(item)" :disabled="item.status==='disabled' || knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '停用' }}</button>
@@ -1059,7 +1110,7 @@ onBeforeUnmount(() => {
           <article class="panel">
             <div class="title-row"><div><h2>审计日志</h2><p>浏览器插件检测会记录责任用户、用户 ID、邮件摘要 ID 与来源页面。</p></div><b>{{ auditLogs.length }} 条记录</b></div>
             <table><thead><tr><th>时间</th><th>责任用户</th><th>动作</th><th>目标</th><th>详情</th></tr></thead>
-              <tbody><tr v-for="item in auditLogs" :key="item.id"><td>{{ item.created_at?.slice(0,19).replace('T',' ') }}</td><td>{{ item.actor }}</td><td>{{ item.action }}</td><td>{{ item.target }}</td><td><code>{{ JSON.stringify(item.details) }}</code></td></tr><tr v-if="!auditLogs.length"><td colspan="5" class="empty-row">暂无审计记录</td></tr></tbody>
+              <tbody><tr v-for="item in auditLogs" :key="item.id"><td>{{ item.created_at?.slice(0,19).replace('T',' ') }}</td><td><b>{{ item.actor }}</b></td><td><div class="audit-action"><b>{{ auditActionLabel(item.action) }}</b><small>{{ item.action }}</small></div></td><td><div class="audit-target"><b>{{ item.target || '-' }}</b><small>{{ auditDescription(item) }}</small></div></td><td><details class="audit-details"><summary>查看字段</summary><pre>{{ JSON.stringify(item.details || {}, null, 2) }}</pre></details></td></tr><tr v-if="!auditLogs.length"><td colspan="5" class="empty-row">暂无审计记录</td></tr></tbody>
             </table>
           </article>
         </template>

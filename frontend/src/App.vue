@@ -76,13 +76,13 @@ const viewScopeLabel = computed(() => (user.value?.role === "admin" ? "全局视
 const navItems = computed(() => {
   const allItems = [
     ["dashboard", "首页"], ["upload", "EML 检测"], ["events", "邮件事件"],
-    ["internal", "内部钓鱼"], ["knowledge", "RAG 知识库"], ["approvals", "审批中心"], ["applications", "应用中心"],
+    ["knowledge", "RAG 知识库"], ["approvals", "审批中心"], ["applications", "应用中心"],
     ["policy", "策略管理"], ["users", "用户管理"], ["settings", "模型 API 设置"],
     ["audit", "审计日志"], ["system", "系统状态"],
   ];
   if (user.value?.role === "admin") return allItems;
-  if (user.value?.role === "auditor") return allItems.filter((item) => ["dashboard", "events", "internal", "applications", "audit", "system"].includes(item[0]));
-  return allItems.filter((item) => ["dashboard", "upload", "events", "internal", "knowledge", "applications", "system"].includes(item[0]));
+  if (user.value?.role === "auditor") return allItems.filter((item) => ["dashboard", "events", "applications", "audit", "system"].includes(item[0]));
+  return allItems.filter((item) => ["dashboard", "upload", "events", "knowledge", "applications", "system"].includes(item[0]));
 });
 const labels = {
   critical: "严重",
@@ -218,7 +218,7 @@ function stopAutoRefresh() {
 }
 
 function openView(name) {
-  if (name === "events" || name === "internal") clearEventFilter();
+  if (name === "events") clearEventFilter();
   view.value = name;
 }
 
@@ -909,7 +909,7 @@ onBeforeUnmount(() => {
         <template v-else-if="view==='upload'">
           <article class="panel upload"><h2>上传 EML 文件检测</h2><p>邮件将进入规则、RAG 与 LLM 分析链路，原文件默认保存 72 小时。</p><label :class="['drop',{dragging:isDraggingEml,busy}]" @dragenter.prevent="enterEmlDropZone" @dragover.prevent="dragEmlOver" @dragleave.prevent="leaveEmlDropZone" @drop.prevent.stop="dropEml"><input type="file" accept=".eml,message/rfc822" @change="uploadEml" :disabled="busy"><b>{{ busy ? '正在提交并开始检测...' : isDraggingEml ? '松开鼠标立即开始检测' : '点击选择或拖拽 .eml 文件' }}</b><span :class="{error:uploadMessage.startsWith('提交失败') || uploadMessage.startsWith('仅支持') || uploadMessage.startsWith('文件超过') || uploadMessage.startsWith('未检测到')}">{{ uploadMessage || '最大 50 MB，拖放后自动开始检测' }}</span></label></article>
         </template>
-        <template v-else-if="view==='events' || view==='internal'">
+        <template v-else-if="view==='events'">
           <div class="grid events"><article class="panel"><div class="event-heading"><div><h3>{{ eventFilter.label }}</h3><small>共 {{ filteredAnalyses.length }} 条结果</small></div><button v-if="eventFilter.type!=='all'" @click="clearEventFilter">清除筛选</button></div><table><thead><tr><th>时间</th><th>来源</th><th>状态</th><th>风险</th></tr></thead><tbody><tr v-for="item in filteredAnalyses" :key="item.id" @click="openAnalysis(item)"><td>{{ item.created_at?.slice(0,19) }}</td><td>{{ item.source_name }}</td><td>{{ label(item.status) }}</td><td><span :class="'tag '+item.risk_level">{{ label(item.risk_level) }}</span></td></tr><tr v-if="!filteredAnalyses.length"><td colspan="4" class="empty-row">当前筛选条件下暂无事件</td></tr></tbody></table></article><article class="panel detail"><div class="title-row"><div><h3>检测详情</h3><small>{{ selected?.id || '请选择左侧事件' }}</small></div><button v-if="selected && ['failed','degraded'].includes(selected.status)" @click="retrySelectedAnalysis">重新分析</button></div><p v-if="actionMessage" class="action-message">{{ actionMessage }}</p><template v-if="selected"><div class="detail-summary"><span :class="'tag '+selected.risk_level">{{ label(selected.risk_level) }}</span><b>{{ label(selected.status) }}</b><small>{{ selected.source_name }}</small></div><section class="evidence-block"><h4>判定依据</h4><p>{{ evidenceSource().reason || selected.quick_result?.reason || '暂无解释' }}</p><div class="evidence-grid"><div><b>命中规则</b><code>{{ evidenceRules().join(', ') || '-' }}</code></div><div><b>认证结果</b><code>{{ JSON.stringify(evidenceSource().authentication || selected.parsed_message?.authentication || {}) }}</code></div><div><b>模型状态</b><code>{{ evidenceSource().llm?.status || '-' }} {{ evidenceSource().llm?.error_type || '' }}</code></div><div><b>RAG 引用</b><code>{{ evidenceSource().rag?.references?.length || 0 }} 条</code></div></div><h4>链接风险</h4><table><thead><tr><th>显示域名</th><th>真实域名</th><th>错配</th><th>可信</th></tr></thead><tbody><tr v-for="(link,index) in evidenceLinks().slice(0,8)" :key="index"><td>{{ link.display_domain || '-' }}</td><td>{{ link.href_domain || '-' }}</td><td>{{ link.display_href_mismatch ? '是' : '否' }}</td><td>{{ link.trusted_href ? '是' : '否' }}</td></tr><tr v-if="!evidenceLinks().length"><td colspan="4" class="empty-row">暂无链接证据</td></tr></tbody></table><div class="settings-actions"><button @click="submitFeedback('false_positive')">标记误报</button><button @click="submitFeedback('confirmed_phishing')">确认钓鱼</button><button @click="submitFeedback('uncertain')">标记不确定</button></div></section><details><summary>原始 JSON</summary><pre>{{ JSON.stringify(selected || {}, null, 2) }}</pre></details></template><p v-else class="empty-row">请选择一条邮件事件查看详情</p></article></div>
           <article v-if="selected" class="panel event-inspector">
             <div class="title-row"><div><h3>邮件完整信息</h3><small>用于复核检测结论的原始解析字段</small></div><span :class="'tag '+selected.risk_level">{{ label(selected.risk_level) }}</span></div>

@@ -17,6 +17,7 @@ const applications = ref([]);
 const systemStatus = ref({ queue: {}, workers: [], provider: {}, database: {}, storage: {}, service: {} });
 const selected = ref(null);
 const eventFilter = ref({ type: "all", value: "", label: "全部邮件事件" });
+const consoleQuery = ref("");
 const busy = ref(false);
 const isDraggingEml = ref(false);
 const emlDragDepth = ref(0);
@@ -50,12 +51,14 @@ const headers = computed(() => (token.value ? { Authorization: `Bearer ${token.v
 let refreshTimer = null;
 const filteredAnalyses = computed(() => {
   const filter = eventFilter.value;
-  if (filter.type === "risk") return analyses.value.filter((item) => item.risk_level === filter.value);
-  if (filter.type === "high") return analyses.value.filter((item) => ["high", "critical"].includes(item.risk_level));
-  if (filter.type === "status") return analyses.value.filter((item) => item.status === filter.value);
-  if (filter.type === "pending") return analyses.value.filter((item) => ["queued", "running"].includes(item.status));
-  if (filter.type === "date") return analyses.value.filter((item) => String(item.created_at || "").startsWith(filter.value));
-  return analyses.value;
+  let items = analyses.value;
+  if (filter.type === "risk") items = items.filter((item) => item.risk_level === filter.value);
+  else if (filter.type === "high") items = items.filter((item) => ["high", "critical"].includes(item.risk_level));
+  else if (filter.type === "status") items = items.filter((item) => item.status === filter.value);
+  else if (filter.type === "pending") items = items.filter((item) => ["queued", "running"].includes(item.status));
+  else if (filter.type === "date") items = items.filter((item) => String(item.created_at || "").startsWith(filter.value));
+  const query = consoleQuery.value.trim().toLowerCase();
+  return query ? items.filter((item) => `${item.source_name || ""} ${item.id || ""}`.toLowerCase().includes(query)) : items;
 });
 const knowledgeStats = computed(() => ({
   total: knowledgeGlobalStats.value.total || knowledgeTotal.value || knowledge.value.length,
@@ -73,17 +76,29 @@ const policyStats = computed(() => ({
   blacklistedDomains: policyLines(policyForm.value.blacklisted_domains).length,
   keywords: policyLines(policyForm.value.high_risk_keywords).length,
 }));
+const userStats = computed(() => ({
+  total: users.value.length,
+  active: users.value.filter((item) => !item.disabled).length,
+  admins: users.value.filter((item) => item.role === "admin" && !item.disabled).length,
+}));
 const viewScopeLabel = computed(() => (user.value?.role === "admin" ? "全局视图" : "个人视图"));
 const navItems = computed(() => {
   const allItems = [
-    ["dashboard", "首页"], ["upload", "EML 检测"], ["events", "邮件事件"],
-    ["knowledge", "RAG 知识库"], ["approvals", "审批中心"], ["applications", "应用中心"],
-    ["policy", "策略管理"], ["users", "用户管理"], ["settings", "模型 API 设置"],
-    ["audit", "审计日志"], ["system", "系统状态"],
+    { id: "dashboard", label: "首页", icon: "⌂" },
+    { id: "upload", label: "EML 检测", icon: "✉" },
+    { id: "events", label: "邮件事件", icon: "▣" },
+    { id: "knowledge", label: "RAG 知识库", icon: "⌘" },
+    { id: "approvals", label: "审批中心", icon: "✓" },
+    { id: "applications", label: "应用中心", icon: "▤" },
+    { id: "policy", label: "策略管理", icon: "⚙" },
+    { id: "users", label: "用户管理", icon: "♙" },
+    { id: "settings", label: "模型 API 设置", icon: "⌁" },
+    { id: "audit", label: "审计日志", icon: "▧" },
+    { id: "system", label: "系统状态", icon: "◉" },
   ];
   if (user.value?.role === "admin") return allItems;
-  if (user.value?.role === "auditor") return allItems.filter((item) => ["dashboard", "events", "applications", "audit", "system"].includes(item[0]));
-  return allItems.filter((item) => ["dashboard", "upload", "events", "knowledge", "applications", "system"].includes(item[0]));
+  if (user.value?.role === "auditor") return allItems.filter((item) => ["dashboard", "events", "applications", "audit", "system"].includes(item.id));
+  return allItems.filter((item) => ["dashboard", "upload", "events", "knowledge", "applications", "system"].includes(item.id));
 });
 const labels = {
   critical: "严重",
@@ -233,6 +248,18 @@ function clearEventFilter() {
   eventFilter.value = { type: "all", value: "", label: "全部邮件事件" };
 }
 
+async function runConsoleSearch() {
+  const query = consoleQuery.value.trim();
+  if (!query) return;
+  if (view.value === "knowledge") {
+    knowledgeFilters.value.q = query;
+    await applyKnowledgeFilters(true);
+    return;
+  }
+  eventFilter.value = { type: "all", value: "", label: `搜索：${query}` };
+  view.value = "events";
+}
+
 async function submitEml(file) {
   uploadMessage.value = "";
   if (!file) {
@@ -367,6 +394,11 @@ function auditDescription(item) {
   if (details.verdict) return `反馈结论：${label(details.verdict)}`;
   if (details.filename) return `文件：${details.filename}`;
   return item?.target ? `对象：${item.target}` : "查看字段了解完整上下文";
+}
+
+function hasAuditDetails(item) {
+  const details = item?.details;
+  return Boolean(details && typeof details === "object" && Object.keys(details).length);
 }
 
 async function retrySelectedAnalysis() {
@@ -893,14 +925,19 @@ onBeforeUnmount(() => {
   <div v-else class="shell">
     <aside>
       <div class="brand"><span class="logo">S</span><div><b>盾穹</b><small>ShieldDome</small></div></div>
-      <button v-for="item in navItems" :key="item[0]" :class="{active:view===item[0]}" @click="openView(item[0])">{{ item[1] }}</button>
+      <nav class="primary-nav" aria-label="主导航"><button v-for="item in navItems" :key="item.id" :class="{active:view===item.id}" @click="openView(item.id)"><span class="nav-icon">{{ item.icon }}</span><span>{{ item.label }}</span></button></nav>
     </aside>
     <main>
-      <header><b>{{ {dashboard:'首页',upload:'EML 检测',events:'邮件事件',internal:'内部钓鱼',knowledge:'RAG 知识库',approvals:'审批中心',applications:'应用中心',policy:'策略管理',users:'用户管理',settings:'模型 API 设置',audit:'审计日志'}[view] || 'ShieldDome 控制台' }}</b><div class="user-area"><span>{{ viewScopeLabel }} · 观察模式 · 不自动隔离</span><b>{{ user.display_name }}</b><small>{{ label(user.role) }}</small><button @click="logout">退出登录</button></div></header>
+      <header class="console-header">
+        <div class="header-title"><small>ShieldDome / 运营控制台</small><b>{{ {dashboard:'首页概览',upload:'EML 检测',events:'邮件事件',knowledge:'RAG 知识库',approvals:'审批中心',applications:'应用中心',policy:'策略管理',users:'用户管理',settings:'模型 API 设置',audit:'审计日志',system:'系统状态'}[view] || 'ShieldDome 控制台' }}</b></div>
+        <form class="header-search" role="search" @submit.prevent="runConsoleSearch"><span>⌕</span><input v-model.trim="consoleQuery" type="search" placeholder="搜索邮件或知识"><button type="submit">搜索</button></form>
+        <div class="user-area"><span class="scope-chip">{{ viewScopeLabel }}</span><div class="user-avatar">{{ user.display_name?.slice(0,1) || 'U' }}</div><div class="user-name"><b>{{ user.display_name }}</b><small>{{ label(user.role) }}</small></div><button @click="logout">退出</button></div>
+      </header>
       <section class="content">
         <p v-if="serviceWarning" class="service-warning">{{ serviceWarning }}</p>
         <p v-if="user.role !== 'admin' && ['dashboard','events','internal','audit'].includes(view)" class="scope-note">当前为个人视图，仅显示你本人提交或产生的邮件检测与审计记录。</p>
         <template v-if="view==='dashboard'">
+          <section class="page-intro dashboard-intro"><div><span class="eyebrow">Security Operations</span><h1>安全态势总览</h1><p>统一查看邮件检测、风险分布与待处理任务。</p></div><div class="intro-note"><b>{{ dashboard.total }}</b><span>累计检测邮件</span></div></section>
           <div class="stats">
             <article class="stat-card clickable" role="button" tabindex="0" @click="drillToEvents('all','','全部邮件事件')" @keyup.enter="drillToEvents('all','','全部邮件事件')"><small>检测总量</small><strong>{{ dashboard.total }}</strong><span>查看全部事件 →</span></article>
             <article class="stat-card clickable" role="button" tabindex="0" @click="drillToEvents('high','','高风险与严重事件')" @keyup.enter="drillToEvents('high','','高风险与严重事件')"><small>高风险</small><strong class="orange">{{ (dashboard.risk.high||0)+(dashboard.risk.critical||0) }}</strong><span>查看风险事件 →</span></article>
@@ -932,14 +969,14 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="view==='knowledge'">
           <div class="knowledge-page">
-            <article class="panel knowledge-heading">
-              <div><h2>RAG 知识库</h2><p>深度检测会检索已发布知识，为模型提供相似案例、可信样本和安全规则；待审核知识不会进入正式研判。</p></div>
-              <div class="import-tools"><select v-model="knowledgeType"><option value="phishing_case">钓鱼案例</option><option value="trusted_email">可信邮件</option><option value="security_rule">安全规则</option><option value="soc_review">SOC 结论</option></select><label :class="['primary',{disabled:knowledgeBusy}]">{{ knowledgeBusy ? '导入中...' : '批量导入' }}<input type="file" multiple accept=".eml,.txt,.md,.csv,.pdf" @change="uploadKnowledge" :disabled="knowledgeBusy"></label><button @click="reindexKnowledge" :disabled="knowledgeBusy || !knowledge.length">重建索引</button></div>
-            </article>
-            <div class="knowledge-flow">
+            <section class="knowledge-hero">
+              <div class="knowledge-hero-copy"><span class="eyebrow">RAG Knowledge Operations</span><h1>知识运营工作台</h1><p>导入可信样本、钓鱼案例和安全规则；经过审核发布后，知识才会参与邮件深度研判。</p><div class="knowledge-hero-stats"><div><b>{{ knowledgeStats.total }}</b><span>全部知识</span></div><div><b>{{ knowledgeStats.published }}</b><span>已参与检索</span></div><div><b>{{ knowledgeStats.pending }}</b><span>待审核</span></div></div></div>
+              <div class="knowledge-hero-actions"><span>选择导入类型</span><select v-model="knowledgeType"><option value="phishing_case">钓鱼案例</option><option value="trusted_email">可信邮件</option><option value="security_rule">安全规则</option><option value="soc_review">SOC 结论</option></select><label :class="['primary',{disabled:knowledgeBusy}]">{{ knowledgeBusy ? '导入中...' : '批量导入知识' }}<input type="file" multiple accept=".eml,.txt,.md,.csv,.pdf" @change="uploadKnowledge" :disabled="knowledgeBusy"></label><button @click="reindexKnowledge" :disabled="knowledgeBusy || !knowledge.length">重建向量索引</button></div>
+            </section>
+            <div class="knowledge-flow knowledge-lifecycle">
               <span>导入</span><b>→</b><span>待审核</span><b>→</b><span>发布</span><b>→</b><span>参与 RAG 检索</span>
             </div>
-            <div class="stats compact knowledge-stats">
+            <div class="stats compact knowledge-stats knowledge-secondary-stats">
               <article><small>全部知识</small><strong>{{ knowledgeStats.total }}</strong><span>含待审核与停用</span></article>
               <article><small>参与检测</small><strong>{{ knowledgeStats.published }}</strong><span>仅已发布状态</span></article>
               <article><small>待审核</small><strong>{{ knowledgeStats.pending }}</strong><span>需人工发布</span></article>
@@ -1019,10 +1056,10 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="view==='policy' && user.role==='admin'">
           <div class="policy-page">
-            <article class="panel policy-heading">
-              <div><h2>检测策略管理</h2><p>策略保存后立即影响新提交邮件。可信项降低误报，黑名单和关键词提供规则证据，阈值决定最终风险等级。</p></div>
-              <button class="primary" @click="saveDetectionPolicy" :disabled="policyBusy">{{ policyBusy ? "正在保存..." : "保存并启用策略" }}</button>
-            </article>
+            <section class="policy-hero">
+              <div><span class="eyebrow">Detection Guardrails</span><h1>检测策略工作台</h1><p>通过可信项、拦截规则与风险阈值，为新提交邮件建立一致、可解释的研判边界。</p></div>
+              <div class="policy-hero-action"><span>保存后立即对新任务生效</span><button class="primary" @click="saveDetectionPolicy" :disabled="policyBusy">{{ policyBusy ? "正在保存..." : "保存并启用策略" }}</button></div>
+            </section>
             <p v-if="policyMessage" class="action-message">{{ policyMessage }}</p>
             <div class="policy-summary">
               <div><small>可信域名</small><b>{{ policyStats.trustedDomains }}</b></div>
@@ -1087,7 +1124,12 @@ onBeforeUnmount(() => {
           </article>
         </template>
         <template v-else-if="view==='users' && user.role==='admin'">
-          <div class="management-grid">
+          <div class="users-page">
+            <section class="users-hero">
+              <div><span class="eyebrow">Access Control</span><h1>账号与权限管理</h1><p>为运营、审计与管理人员分配独立账号；停用账号会立即撤销登录会话与插件 Token。</p></div>
+              <div class="users-hero-stats"><div><b>{{ userStats.total }}</b><span>全部账号</span></div><div><b>{{ userStats.active }}</b><span>正常账号</span></div><div><b>{{ userStats.admins }}</b><span>系统管理员</span></div></div>
+            </section>
+            <div class="management-grid">
             <article class="panel user-create">
               <h2>创建用户</h2><p>为安全运营、审计或系统管理人员创建独立账号。</p>
               <form @submit.prevent="createUser">
@@ -1114,12 +1156,13 @@ onBeforeUnmount(() => {
               </table>
             </article>
           </div>
+          </div>
         </template>
         <template v-else-if="view==='audit'">
           <article class="panel">
             <div class="title-row"><div><h2>审计日志</h2><p>浏览器插件检测会记录责任用户、用户 ID、邮件摘要 ID 与来源页面。</p></div><b>{{ auditLogs.length }} 条记录</b></div>
             <table><thead><tr><th>时间</th><th>责任用户</th><th>动作</th><th>目标</th><th>详情</th></tr></thead>
-              <tbody><tr v-for="item in auditLogs" :key="item.id"><td>{{ item.created_at?.slice(0,19).replace('T',' ') }}</td><td><b>{{ item.actor }}</b></td><td><div class="audit-action"><b>{{ auditActionLabel(item.action) }}</b><small>{{ item.action }}</small></div></td><td><div class="audit-target"><b>{{ item.target || '-' }}</b><small>{{ auditDescription(item) }}</small></div></td><td><details class="audit-details"><summary>查看字段</summary><pre>{{ JSON.stringify(item.details || {}, null, 2) }}</pre></details></td></tr><tr v-if="!auditLogs.length"><td colspan="5" class="empty-row">暂无审计记录</td></tr></tbody>
+              <tbody><tr v-for="item in auditLogs" :key="item.id"><td>{{ item.created_at?.slice(0,19).replace('T',' ') }}</td><td><b>{{ item.actor }}</b></td><td><div class="audit-action"><b>{{ auditActionLabel(item.action) }}</b><small>{{ item.action }}</small></div></td><td><div class="audit-target"><b>{{ item.target || '-' }}</b><small>{{ auditDescription(item) }}</small></div></td><td><details v-if="hasAuditDetails(item)" class="audit-details"><summary>查看字段</summary><pre>{{ JSON.stringify(item.details, null, 2) }}</pre></details><span v-else class="audit-empty">无附加字段</span></td></tr><tr v-if="!auditLogs.length"><td colspan="5" class="empty-row">暂无审计记录</td></tr></tbody>
             </table>
           </article>
         </template>

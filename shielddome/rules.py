@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .config import BLACKLISTED_DOMAINS, HIGH_RISK_KEYWORDS, RISK_THRESHOLDS
+from .evidence import Evidence, aggregate_evidence
 from .links import is_trusted_domain, normalize_domain, structuralize_links
 
 
@@ -61,6 +62,7 @@ def analyze_quick(
         trusted_urls,
     )
     sender_domain = normalize_domain(sender)
+    trusted_sender = bool(sender_domain) and is_trusted_domain(sender_domain, trusted_domains, trusted_include_subdomains)
     text_blob = " ".join(
         [
             subject,
@@ -73,8 +75,7 @@ def analyze_quick(
 
     matched_rules: list[str] = []
     evidence: dict[str, Any] = {"links": links, "sender_domain": sender_domain}
-    score_breakdown: dict[str, int] = {}
-    score = 0
+    evidences: list[Evidence] = []
 
     external_links = [
         link for link in links if link["href_domain"] and link.get("is_web_link", True) and not link["trusted_href"]
@@ -85,34 +86,53 @@ def analyze_quick(
     ]
     high_risk_intent = _contains_high_risk_keyword(text_blob, high_risk_keywords)
 
-    def add_score(rule: str, value: int) -> None:
-        nonlocal score
-        score += value
-        score_breakdown[rule] = value
+    def add_score(
+        rule: str,
+        value: int,
+        group: str,
+        title: str,
+        explanation: str,
+        entity_key: str = "message",
+        confidence: float = 1.0,
+        suppression_factor: float = 1.0,
+        suppression_reasons: tuple[str, ...] = (),
+    ) -> None:
         matched_rules.append(rule)
+        evidences.append(Evidence(
+            rule_id=rule, title=title, explanation=explanation, group=group,
+            base_weight=value, confidence=confidence, entity_key=entity_key,
+            suppression_factor=suppression_factor, suppression_reasons=suppression_reasons,
+        ))
 
     if blacklisted_links:
-        add_score("blacklisted_domain", 90)
+        add_score("blacklisted_domain", 90, "reputation", "命中高风险域名", "链接目标已被列入高风险名单。", "domain:blacklisted", 1.0)
 
     if mismatched_links:
-        add_score("display_href_mismatch", 50)
+        add_score("display_href_mismatch", 50, "url_deception", "邮件链接存在伪装", "显示地址与实际跳转网站不一致。", "url:any", 1.0)
 
     if external_links:
-        add_score("external_link", 8)
+        add_score("external_link", 8, "url_deception", "邮件包含外部链接", "链接目标不在当前可信范围内。", "url:any", 1.0)
 
     if high_risk_intent:
-        add_score("high_risk_keyword", 7)
+        keyword_suppressed = trusted_sender and not external_links
+        add_score(
+            "high_risk_keyword", 7, "sensitive_intent", "邮件包含敏感操作",
+            "内容涉及登录、密码、付款或审批等敏感操作。", confidence=1.0,
+            suppression_factor=0.5 if keyword_suppressed else 1.0,
+            suppression_reasons=("可信发件人且未包含外部链接",) if keyword_suppressed else (),
+        )
 
     if high_risk_intent and external_links:
-        add_score("internal_intent_external_link", 15)
+        add_score("internal_intent_external_link", 15, "sensitive_intent", "敏感操作指向外部网站", "邮件要求执行敏感操作，同时包含外部链接。", "intent:external", 1.0)
 
     if mismatched_links and any(is_trusted_domain(link.get("display_domain", ""), trusted_domains, trusted_include_subdomains) for link in mismatched_links):
-        add_score("trusted_display_external_href", 25)
+        add_score("trusted_display_external_href", 25, "url_deception", "链接冒充可信网站", "链接显示为可信网站，但实际跳转到外部地址。", "url:any", 1.0)
 
     if sender_domain and not is_trusted_domain(sender_domain, trusted_domains, trusted_include_subdomains) and high_risk_intent:
-        add_score("external_sender_high_risk_intent", 5)
+        add_score("external_sender_high_risk_intent", 5, "sender_identity", "外部发件人要求敏感操作", "非可信发件人要求执行敏感业务操作。", confidence=1.0)
 
-    score = min(score, 100)
+    aggregated = aggregate_evidence(evidences, thresholds)
+    score = int(aggregated["score"])
     risk_level, action = _level_and_action(score, thresholds)
     deep_scan_required = risk_level in {"low", "medium", "high"}
 
@@ -138,7 +158,14 @@ def analyze_quick(
         "deep_scan_required": deep_scan_required,
         "evidence": {
             **evidence,
-            "score_breakdown": score_breakdown,
+            "score_breakdown": {
+                item["rule_id"]: int(item["effective_weight"])
+                for item in aggregated["evidences"]
+                if int(item["effective_weight"])
+            },
+            "evidences": aggregated["evidences"],
+            "group_scores": aggregated["group_scores"],
+            "calculation": aggregated["calculation"],
             "policy_summary": {
                 "trusted_domains": len(trusted_domains or []),
                 "trusted_urls": len(trusted_urls),

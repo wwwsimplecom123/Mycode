@@ -1,12 +1,15 @@
 import tempfile
 import unittest
 import uuid
+import json
+import sqlite3
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.api import check_rate_limit
 from shielddome.enterprise import EnterpriseService
+from shielddome.evaluation import evaluate_dataset, recommend_thresholds
 from shielddome.analyzer import AnalyzerService
 from shielddome.mail_parser import parse_eml
 from shielddome.storage import Database
@@ -122,6 +125,46 @@ class TimeoutProvider(SiliconFlowProvider):
 
 
 class EnterpriseTests(unittest.TestCase):
+    def test_legacy_analysis_schema_migrates_and_backfills_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.db"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """CREATE TABLE analyses (
+                id TEXT PRIMARY KEY, source_name TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT,
+                quick_result TEXT NOT NULL, parsed_message TEXT NOT NULL, result TEXT, raw_path TEXT,
+                error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "INSERT INTO analyses VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                ["a1", "legacy.eml", "completed", "low", "{}", json.dumps({"submitted_by": {"id": "owner-1"}}), None, "", None, "2026-01-01", "2026-01-01"],
+            )
+            connection.commit()
+            connection.close()
+
+            database = Database(f"sqlite:///{path}")
+            database.initialize()
+            migrated = database.get_analysis("a1")
+
+            self.assertEqual(migrated["owner_user_id"], "owner-1")
+            self.assertEqual(migrated["visibility"], "private")
+
+    def test_offline_evaluation_reports_metrics_and_recommends_thresholds(self):
+        rows = [
+            {"label": "phishing", "snapshot": {"risk_score": 90}},
+            {"label": "phishing", "snapshot": {"risk_score": 70}},
+            {"label": "benign", "snapshot": {"risk_score": 10}},
+            {"label": "benign", "snapshot": {"risk_score": 20}},
+        ]
+        metrics = evaluate_dataset(rows, 35)
+        report = recommend_thresholds(rows)
+
+        self.assertEqual(metrics["recall"], 1.0)
+        self.assertEqual(metrics["false_positive_rate"], 0.0)
+        self.assertTrue(report["meets_release_gate"])
+        self.assertIsNotNone(report["recommended"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.db = Database(f"sqlite:///{Path(self.temp.name) / 'test.db'}")
@@ -373,6 +416,12 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(item["status"], "pending")
         self.assertEqual(item["source_type"], "phishing_case")
         self.assertNotIn("evil-login.com/reset", str(self.db.list_audit()))
+        label = self.db.get_analysis_label(result["label_id"])
+        self.assertEqual(label["label"], "phishing")
+        self.assertEqual(label["status"], "pending")
+        reviewed = self.db.review_analysis_label(label["id"], "confirmed", "reviewer-1")
+        self.assertEqual(reviewed["status"], "confirmed")
+        self.assertEqual(len(self.db.confirmed_evaluation_dataset()), 1)
 
     def test_local_admin_login_creates_revocable_session(self):
         login = self.service.auth.login("admin", "ChangeMe-Before-Production")
@@ -456,6 +505,8 @@ class EnterpriseTests(unittest.TestCase):
         stored = self.db.get_analysis(queued["analysis_id"])
 
         self.assertEqual(stored["parsed_message"]["submitted_by"]["username"], "eml.owner")
+        self.assertEqual(stored["owner_user_id"], managed["id"])
+        self.assertEqual(stored["visibility"], "private")
         self.assertEqual(self.db.list_analyses_for_actor(managed["id"], managed["username"])[0]["id"], queued["analysis_id"])
         self.assertEqual(self.db.list_audit(actor="eml.owner")[0]["target"], queued["analysis_id"])
 
@@ -640,8 +691,9 @@ class EnterpriseTests(unittest.TestCase):
 
         self.assertEqual(queued["quick_result"]["risk_level"], "medium")
         self.assertEqual(result["risk_level"], "medium")
-        self.assertEqual(result["risk_score"], 64)
-        self.assertIn("high_risk_requires_strong_deterministic_evidence", result["calibration"]["notes"])
+        self.assertEqual(result["risk_score"], 55)
+        self.assertEqual(result["group_scores"]["model_semantics"], 20)
+        self.assertEqual(result["llm"]["risk_delta"], 30)
 
     def test_memory_rate_limiter_blocks_after_limit(self):
         bucket = defaultdict(deque)

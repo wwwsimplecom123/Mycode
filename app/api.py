@@ -11,7 +11,7 @@ import time
 import zipfile
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shielddome.enterprise import EnterpriseService  # noqa: E402
+from shielddome.permissions import analysis_scope, has_permission  # noqa: E402
 from shielddome.settings import SETTINGS  # noqa: E402
 
 
@@ -122,6 +123,10 @@ class ResetPasswordRequest(BaseModel):
     password: str = Field(min_length=12, max_length=300)
 
 
+class ReviewLabelRequest(BaseModel):
+    status: str = Field(pattern="^(confirmed|rejected)$")
+
+
 def bearer_token(authorization: str) -> str:
     prefix = "Bearer "
     return authorization[len(prefix) :].strip() if authorization.startswith(prefix) else ""
@@ -181,6 +186,21 @@ def require_console_actor(
     raise HTTPException(status_code=401, detail="请先登录或提供有效的控制台 API Key")
 
 
+def require_permission(permission: str) -> Callable[..., dict[str, Any]]:
+    """Build a FastAPI dependency for one explicit capability."""
+    def dependency(
+        authorization: str = Header(default=""),
+        x_api_key: str = Header(default=""),
+        shielddome_session: str = Cookie(default=""),
+    ) -> dict[str, Any]:
+        actor = require_console_actor(authorization, x_api_key, shielddome_session)
+        if not has_permission(actor, permission):
+            raise HTTPException(status_code=403, detail=f"缺少操作权限：{permission}")
+        return actor
+
+    return dependency
+
+
 def require_ingest(
     authorization: str = Header(default=""),
     x_api_key: str = Header(default=""),
@@ -196,10 +216,13 @@ def require_ingest_actor(
     shielddome_session: str = Cookie(default=""),
 ) -> dict[str, Any]:
     user = SERVICE.auth.authenticate(session_token(authorization, shielddome_session))
-    if user and user.get("role") in {"admin", "analyst"}:
+    if user and has_permission(user, "analysis:create"):
         return user
     if INGEST_TOKEN and x_api_key == INGEST_TOKEN:
-        return {"id": "api-ingest", "username": "api-ingest", "display_name": "API Ingest", "role": "admin"}
+        return {
+            "id": "api-ingest", "username": "api-ingest", "display_name": "API Ingest",
+            "role": "service", "permissions": ["analysis:create"],
+        }
     raise HTTPException(status_code=401, detail="请先登录或提供有效的邮件接入 API Key")
 
 
@@ -209,6 +232,8 @@ def require_browser_probe(x_shielddome_plugin_token: str = Header(default="")) -
         if not check_rate_limit(PLUGIN_RATE_LIMIT, token_key, *PLUGIN_LIMIT):
             raise HTTPException(status_code=429, detail="插件请求过于频繁，请稍后重试")
     user = SERVICE.auth.authenticate_plugin_token(x_shielddome_plugin_token)
+    if user and not has_permission(user, "analysis:create"):
+        raise HTTPException(status_code=403, detail="该用户没有邮件检测提交权限")
     if not user and PLUGIN_AUTH_OPTIONAL:
         fallback_key = f"optional:{hashlib.sha256(str(x_shielddome_plugin_token or 'anonymous').encode('utf-8')).hexdigest()[:16]}"
         if not check_rate_limit(PLUGIN_RATE_LIMIT, fallback_key, *PLUGIN_LIMIT):
@@ -258,7 +283,9 @@ def actor_username(actor: dict[str, Any]) -> str:
 
 
 def ensure_analysis_visible(item: dict[str, Any], actor: dict[str, Any]) -> None:
-    if is_global_actor(actor):
+    if analysis_scope(actor)["kind"] == "all":
+        return
+    if str(item.get("owner_user_id") or "") == str(actor.get("id") or ""):
         return
     submitted = (item.get("parsed_message") or {}).get("submitted_by") or {}
     if str(submitted.get("id") or "") == str(actor.get("id") or ""):
@@ -367,7 +394,8 @@ def browser_probe_status(analysis_id: str, actor: dict[str, Any] = Depends(requi
         raise HTTPException(status_code=404, detail="Analysis not found")
     parsed = item.get("parsed_message") or {}
     submitted = parsed.get("submitted_by") or {}
-    if str(submitted.get("id") or "") != str(actor["id"]):
+    owner_id = str(item.get("owner_user_id") or submitted.get("id") or "")
+    if owner_id != str(actor["id"]):
         raise HTTPException(status_code=403, detail="无权查看其他用户提交的插件检测")
     status = str(item.get("status") or "")
     deep_status = {
@@ -388,10 +416,8 @@ def browser_probe_status(analysis_id: str, actor: dict[str, Any] = Depends(requi
 
 
 @app.get("/api/v1/dashboard")
-def dashboard(actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
-    if is_global_actor(actor):
-        return SERVICE.db.dashboard()
-    return SERVICE.db.dashboard(str(actor.get("id") or ""), actor_username(actor))
+def dashboard(actor: dict[str, Any] = Depends(require_permission("analysis:read"))) -> dict[str, Any]:
+    return SERVICE.db.dashboard_for_scope(analysis_scope(actor))
 
 
 @app.post("/api/v1/messages/analyze", status_code=202)
@@ -406,17 +432,15 @@ async def analyze_message(file: UploadFile = File(...), actor: dict[str, Any] = 
 
 
 @app.get("/api/v1/analyses")
-def list_analyses(page: int = 1, limit: int = 100, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def list_analyses(page: int = 1, limit: int = 100, actor: dict[str, Any] = Depends(require_permission("analysis:read"))) -> dict[str, Any]:
     page = max(page, 1)
     limit = min(max(limit, 1), 500)
     offset = (page - 1) * limit
-    if is_global_actor(actor):
-        return {"items": SERVICE.db.list_analyses(limit, offset), "page": page, "limit": limit}
-    return {"items": SERVICE.db.list_analyses_for_actor(str(actor.get("id") or ""), actor_username(actor), limit, offset), "page": page, "limit": limit}
+    return {"items": SERVICE.db.list_analyses_by_scope(analysis_scope(actor), limit, offset), "page": page, "limit": limit}
 
 
 @app.get("/api/v1/analyses/{analysis_id}")
-def get_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def get_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_permission("analysis:read"))) -> dict[str, Any]:
     item = SERVICE.db.get_analysis(analysis_id)
     if not item:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -425,7 +449,7 @@ def get_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_conso
 
 
 @app.post("/api/v1/analyses/{analysis_id}/retry")
-def retry_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def retry_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_permission("analysis:retry"))) -> dict[str, Any]:
     try:
         item = SERVICE.db.get_analysis(analysis_id)
         if not item:
@@ -437,15 +461,29 @@ def retry_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_con
 
 
 @app.post("/api/v1/analyses/{analysis_id}/feedback")
-def feedback(analysis_id: str, request: FeedbackRequest, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def feedback(analysis_id: str, request: FeedbackRequest, actor: dict[str, Any] = Depends(require_permission("analysis:feedback"))) -> dict[str, Any]:
     try:
         item = SERVICE.db.get_analysis(analysis_id)
         if not item:
             raise HTTPException(status_code=404, detail="Analysis not found")
         ensure_analysis_visible(item, actor)
-        return SERVICE.feedback(analysis_id, request.verdict, request.comment)
+        return SERVICE.feedback(analysis_id, request.verdict, request.comment, actor)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/labels", dependencies=[Depends(require_admin)])
+def list_analysis_labels(status: str = "", limit: int = 200) -> dict[str, Any]:
+    return {"items": SERVICE.db.list_analysis_labels(status, min(max(limit, 1), 1000))}
+
+
+@app.post("/api/v1/labels/{label_id}/review")
+def review_analysis_label(label_id: str, request: ReviewLabelRequest, actor: str = Depends(require_admin)) -> dict[str, Any]:
+    item = SERVICE.db.review_analysis_label(label_id, request.status, actor)
+    if not item:
+        raise HTTPException(status_code=404, detail="Label not found")
+    SERVICE.db.record_audit(actor, "analysis.label_reviewed", label_id, {"status": request.status})
+    return item
 
 
 @app.post("/api/v1/knowledge/import")
@@ -483,7 +521,7 @@ def import_knowledge_text(request: KnowledgeTextRequest, _actor: str = Depends(r
     return SERVICE.import_knowledge(request.title, request.source_type, request.content, request.metadata)
 
 
-@app.get("/api/v1/knowledge", dependencies=[Depends(require_console)])
+@app.get("/api/v1/knowledge", dependencies=[Depends(require_permission("knowledge:read"))])
 def list_knowledge(
     page: int = 1,
     limit: int = 50,
@@ -503,7 +541,7 @@ def list_knowledge(
     return {**result, "page": page, "limit": limit, "stats": SERVICE.db.knowledge_stats()}
 
 
-@app.get("/api/v1/knowledge/{item_id}", dependencies=[Depends(require_console)])
+@app.get("/api/v1/knowledge/{item_id}", dependencies=[Depends(require_permission("knowledge:read"))])
 def knowledge_detail(item_id: str) -> dict[str, Any]:
     item = SERVICE.db.get_knowledge(item_id)
     if not item:
@@ -557,7 +595,7 @@ def search_knowledge(q: str, limit: int = 5) -> dict[str, Any]:
     return {"items": SERVICE.search_knowledge(q, limit)}
 
 
-@app.get("/api/v1/settings/providers", dependencies=[Depends(require_console)])
+@app.get("/api/v1/settings/providers", dependencies=[Depends(require_permission("provider:read"))])
 def provider_settings() -> dict[str, Any]:
     return SERVICE.provider_config()
 
@@ -575,7 +613,7 @@ def test_provider_settings(_actor: str = Depends(require_admin)) -> dict[str, An
     return SERVICE.test_provider()
 
 
-@app.get("/api/v1/settings/detection-policy", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/settings/detection-policy", dependencies=[Depends(require_permission("policy:read"))])
 def detection_policy_settings() -> dict[str, Any]:
     return SERVICE.detection_policy()
 
@@ -614,16 +652,16 @@ def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_a
 
 
 @app.get("/api/v1/audit")
-def audit(page: int = 1, limit: int = 200, actor: dict[str, Any] = Depends(require_console_actor)) -> dict[str, Any]:
+def audit(page: int = 1, limit: int = 200, actor: dict[str, Any] = Depends(require_permission("audit:read:self"))) -> dict[str, Any]:
     page = max(page, 1)
     limit = min(max(limit, 1), 1000)
     offset = (page - 1) * limit
-    if is_global_actor(actor):
+    if has_permission(actor, "audit:read:any"):
         return {"items": SERVICE.db.list_audit(limit, offset=offset), "page": page, "limit": limit}
     return {"items": SERVICE.db.list_audit(limit, actor_username(actor), offset), "page": page, "limit": limit}
 
 
-@app.get("/api/v1/system/status", dependencies=[Depends(require_console)])
+@app.get("/api/v1/system/status", dependencies=[Depends(require_permission("system:read"))])
 def system_status() -> dict[str, Any]:
     return SERVICE.system_status()
 
@@ -716,7 +754,7 @@ def browser_extension_package() -> tuple[bytes, dict[str, Any]]:
     }
 
 
-@app.get("/api/v1/apps", dependencies=[Depends(require_console)])
+@app.get("/api/v1/apps", dependencies=[Depends(require_permission("application:download"))])
 def list_apps() -> dict[str, Any]:
     _, application = browser_extension_package()
     return {"items": [application]}

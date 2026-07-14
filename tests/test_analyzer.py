@@ -3,11 +3,56 @@ import unittest
 
 from shielddome.analyzer import AnalyzerService
 from shielddome.entities import generalize_entities, sanitize_model_value
+from shielddome.evidence import Evidence, aggregate_evidence, aggregate_rag_matches, explain_final_score
 from shielddome.links import structuralize_links
 from shielddome.rules import analyze_quick
 
 
 class ShieldDomeAnalyzerTests(unittest.TestCase):
+    def test_rag_aggregation_is_order_independent_and_reports_conflict(self):
+        matches = [
+            {"source_type": "phishing_case", "score": 0.9},
+            {"source_type": "trusted_email", "score": 0.88},
+        ]
+        forward = aggregate_rag_matches(matches)
+        reverse = aggregate_rag_matches(list(reversed(matches)))
+
+        self.assertEqual(forward, reverse)
+        self.assertTrue(forward["conflict"])
+        self.assertEqual(forward["risk_delta"], 0)
+        self.assertTrue(forward["requires_manual_review"])
+
+    def test_structured_evidence_deduplicates_one_fact_and_explains_exact_score(self):
+        thresholds = {"medium": 35, "high": 65, "critical": 85}
+        aggregated = aggregate_evidence(
+            [
+                Evidence("external_link", "外部链接", "包含外部链接", "url_deception", 8, entity_key="url:1"),
+                Evidence("display_href_mismatch", "链接伪装", "显示与跳转不一致", "url_deception", 50, entity_key="url:1"),
+                Evidence("high_risk_keyword", "敏感操作", "要求重新登录", "sensitive_intent", 7),
+            ],
+            thresholds,
+        )
+
+        self.assertEqual(aggregated["score"], 57)
+        external = next(item for item in aggregated["evidences"] if item["rule_id"] == "external_link")
+        self.assertTrue(external["deduplicated"])
+        self.assertEqual(external["effective_weight"], 0)
+        explanation = explain_final_score(aggregated["group_scores"], [], aggregated["score"], thresholds)
+        self.assertEqual(sum(item["score"] for item in explanation["items"]), explanation["final_score"])
+
+    def test_trusted_internal_keyword_evidence_is_suppressed_but_visible(self):
+        result = analyze_quick({
+            "subject": "OA 密码重置提醒",
+            "sender": "security@company.com",
+            "body_text": "请按流程重置密码",
+            "links": [],
+        })
+
+        evidence = next(item for item in result["evidence"]["evidences"] if item["rule_id"] == "high_risk_keyword")
+        self.assertTrue(evidence["suppressed"])
+        self.assertEqual(evidence["effective_weight"], 4)
+        self.assertTrue(evidence["suppression_reasons"])
+
     def test_quick_blocks_display_href_mismatch_with_sensitive_intent(self):
         payload = {
             "subject": "紧急：OA 密码重置",

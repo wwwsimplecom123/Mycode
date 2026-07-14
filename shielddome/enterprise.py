@@ -14,7 +14,9 @@ from typing import Any
 
 from .analyzer import calibrate_score, level_and_action
 from .auth import AuthService
+from .config import RISK_THRESHOLDS
 from .entities import generalize_entities, sanitize_model_value
+from .evidence import Evidence, aggregate_evidence, aggregate_rag_matches, evidence_from_dict, explain_final_score
 from .mail_parser import parse_eml
 from .links import normalize_domain, normalize_web_url
 from .providers import SiliconFlowProvider
@@ -72,7 +74,7 @@ class EnterpriseService:
         quick = self._add_auth_and_attachment_signals(quick, parsed, policy["risk_thresholds"])
         digest = hashlib.sha256(raw).hexdigest()
         raw_path = self.raw_store.put(digest, raw)
-        analysis_id = self.db.create_analysis(filename, str(raw_path), parsed, quick)
+        analysis_id = self.db.create_analysis(filename, str(raw_path), parsed, quick, actor)
         audit_actor = str((actor or {}).get("username") or "api")
         self.db.record_audit(
             audit_actor,
@@ -144,7 +146,7 @@ class EnterpriseService:
             "links": parsed["links"],
         }
         quick = analyze_quick(quick_payload, policy=self.detection_policy())
-        analysis_id = self.db.create_analysis(f"browser:{parsed['mail_client'] or 'unknown'}", "", parsed, quick)
+        analysis_id = self.db.create_analysis(f"browser:{parsed['mail_client'] or 'unknown'}", "", parsed, quick, actor)
         self.db.record_audit(
             parsed["submitted_by"]["username"] or "browser-probe",
             "browser_probe.queued",
@@ -179,14 +181,8 @@ class EnterpriseService:
         query = f"{generalized_subject['text']}\n{generalized_body['text'][:6000]}"
         rag = self.search_knowledge(query, limit=5)
 
-        score = int(quick.get("risk_score") or 0)
-        rag_delta = 0
-        for item in rag:
-            if item["source_type"] == "phishing_case":
-                rag_delta = max(rag_delta, round(item["score"] * 25))
-            elif item["source_type"] == "trusted_email":
-                rag_delta = min(rag_delta, -round(item["score"] * 10))
-        score += rag_delta
+        rag_evaluation = aggregate_rag_matches(rag)
+        rag_delta = int(rag_evaluation["risk_delta"])
 
         authentication = parsed.get("authentication") or {}
         known_authentication = {key: value for key, value in authentication.items() if value != "unknown"}
@@ -227,7 +223,43 @@ class EnterpriseService:
             ],
         }
         llm = self.provider.chat(sanitize_model_value(llm_context))
-        score += int(llm.get("risk_delta") or 0)
+        structured = [
+            evidence_from_dict(item)
+            for item in quick.get("evidence", {}).get("evidences", [])
+            if isinstance(item, dict) and int(item.get("effective_weight") or 0)
+        ]
+        if rag_delta:
+            structured.append(Evidence(
+                rule_id="rag_similarity",
+                title="历史案例相似度",
+                explanation="与已审核的历史钓鱼或可信邮件样本相似。",
+                group="rag_similarity",
+                base_weight=abs(rag_delta),
+                polarity="protective" if rag_delta < 0 else "risk",
+                confidence=1.0,
+                entity_key="message:rag",
+                source="rag",
+                attributes=rag_evaluation,
+            ))
+        llm_delta = max(-20, min(20, int(llm.get("risk_delta") or 0)))
+        if llm_delta:
+            structured.append(Evidence(
+                rule_id="model_semantic_signal",
+                title="智能语义分析",
+                explanation=str(llm.get("reason") or "模型发现补充语义信号。")[:200],
+                group="model_semantics",
+                base_weight=abs(llm_delta),
+                polarity="protective" if llm_delta < 0 else "risk",
+                confidence=1.0,
+                entity_key="message:model",
+                source="llm",
+                attributes={"signals": list(llm.get("signals") or [])[:20]},
+            ))
+        if structured:
+            deep_aggregation = aggregate_evidence(structured, thresholds)
+            score = int(deep_aggregation["score"])
+        else:
+            score = int(quick.get("risk_score") or 0) + rag_delta + llm_delta
         attachment_indicators = [
             indicator
             for attachment in parsed.get("attachments", [])
@@ -235,6 +267,25 @@ class EnterpriseService:
         ]
         score, calibration_notes = calibrate_score(score, quick.get("matched_rules", []), attachment_indicators, thresholds)
         risk_level, _ = level_and_action(score, thresholds)
+        calculation = explain_final_score(
+            quick.get("evidence", {}).get("group_scores", {}),
+            [
+                {
+                    "group": "rag_similarity",
+                    "title": "历史案例相似度",
+                    "explanation": "与已审核的历史邮件样本进行比较。",
+                    "score": rag_delta,
+                },
+                {
+                    "group": "model_semantics",
+                    "title": "智能语义分析",
+                    "explanation": str(llm.get("reason") or "模型未提供额外风险说明。")[:200],
+                    "score": llm_delta,
+                },
+            ],
+            score,
+            thresholds,
+        )
         degraded = llm.get("status") in {"failed", "not_configured"}
         if "high_risk_requires_strong_deterministic_evidence" in calibration_notes:
             reason = "模型或语义分析发现可疑特征，但缺少强规则证据，已限制为中风险并建议复核。"
@@ -250,9 +301,12 @@ class EnterpriseService:
             "quick_result": quick,
             "authentication": parsed.get("authentication") or {},
             "attachments": parsed.get("attachments") or [],
-            "rag": {"risk_delta": rag_delta, "references": rag},
+            "rag": {**rag_evaluation, "references": rag},
             "llm": llm,
+            "evidences": deep_aggregation["evidences"] if structured else [],
+            "group_scores": deep_aggregation["group_scores"] if structured else {},
             "calibration": {"notes": calibration_notes},
+            "calculation": calculation,
             "privacy": {
                 "model_context_sanitized": True,
                 "raw_body_sent_to_llm": False,
@@ -448,10 +502,38 @@ class EnterpriseService:
                 )
         return sorted(ranked, key=lambda item: item["score"], reverse=True)[: max(1, min(limit, 20))]
 
-    def feedback(self, analysis_id: str, verdict: str, comment: str) -> dict[str, Any]:
+    def feedback(
+        self,
+        analysis_id: str,
+        verdict: str,
+        comment: str,
+        actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         analysis = self.db.get_analysis(analysis_id)
         if not analysis:
             raise KeyError(f"Unknown analysis_id: {analysis_id}")
+        label_map = {
+            "false_positive": "benign",
+            "confirmed_phishing": "phishing",
+            "uncertain": "unknown",
+        }
+        if verdict not in label_map:
+            raise ValueError("Unsupported feedback verdict")
+        current_result = analysis.get("result") or analysis.get("quick_result") or {}
+        label_record = self.db.create_analysis_label(
+            analysis_id,
+            label_map[verdict],
+            0.5 if verdict == "uncertain" else 1.0,
+            str((actor or {}).get("id") or (actor or {}).get("username") or "soc"),
+            comment,
+            {
+                "risk_score": int(current_result.get("risk_score") or 0),
+                "risk_level": str(current_result.get("risk_level") or "low"),
+                "policy_version": "legacy-policy",
+                "rule_version": 1,
+                "model": str((current_result.get("llm") or {}).get("model") or ""),
+            },
+        )
         knowledge_id = ""
         if verdict in {"false_positive", "confirmed_phishing"}:
             parsed = analysis.get("parsed_message") or {}
@@ -484,16 +566,24 @@ class EnterpriseService:
             )
             self.db.queue_knowledge_embedding(knowledge_id)
         self.db.record_audit(
-            "soc",
+            str((actor or {}).get("username") or "soc"),
             "analysis.feedback",
             analysis_id,
-            {"verdict": verdict, "comment_len": len(comment or ""), "knowledge_id": knowledge_id},
+            {
+                "verdict": verdict,
+                "comment_len": len(comment or ""),
+                "knowledge_id": knowledge_id,
+                "label_id": str(label_record.get("id") or ""),
+                "user_id": str((actor or {}).get("id") or ""),
+            },
         )
         return {
             "analysis_id": analysis_id,
             "status": "recorded",
             "knowledge_promotion": "pending_review" if knowledge_id else "not_created",
             "knowledge_id": knowledge_id,
+            "label_id": str(label_record.get("id") or ""),
+            "label_status": "pending",
         }
 
     def retry_analysis(self, analysis_id: str, actor: str = "admin") -> dict[str, Any]:
@@ -538,9 +628,15 @@ class EnterpriseService:
         thresholds: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         authentication = parsed.get("authentication") or {}
-        score = int(quick.get("risk_score") or 0)
         matched = list(quick.get("matched_rules") or [])
-        score_breakdown = dict(quick.get("evidence", {}).get("score_breakdown") or {})
+        structured = [
+            evidence_from_dict(item)
+            for item in quick.get("evidence", {}).get("evidences", [])
+            if isinstance(item, dict)
+        ]
+        # Backward compatibility for analyses created before structured evidence existed.
+        if not structured:
+            return quick
         authentication_score = 0
         for name in ("spf", "dkim", "dmarc"):
             if authentication.get(name) == "fail":
@@ -548,8 +644,15 @@ class EnterpriseService:
                 authentication_score += 20 if name == "dmarc" else 8
         if authentication_score:
             authentication_score = min(25, authentication_score)
-            score += authentication_score
-            score_breakdown["authentication_failures"] = authentication_score
+            structured.append(Evidence(
+                rule_id="authentication_failures",
+                title="邮件身份验证失败",
+                explanation="SPF、DKIM或DMARC验证存在失败项。",
+                group="authentication",
+                base_weight=authentication_score,
+                confidence=1.0,
+                entity_key="message:authentication",
+            ))
         attachment_indicators = [
             indicator
             for attachment in parsed.get("attachments", [])
@@ -557,16 +660,32 @@ class EnterpriseService:
         ]
         if attachment_indicators:
             attachment_score = min(40, 15 + len(attachment_indicators) * 5)
-            score += attachment_score
-            score_breakdown["suspicious_attachment"] = attachment_score
             matched.append("suspicious_attachment")
-        score = min(score, 100)
+            structured.append(Evidence(
+                rule_id="suspicious_attachment",
+                title="附件包含可疑特征",
+                explanation="附件类型、文件内容或扩展名存在安全风险。",
+                group="attachment",
+                base_weight=attachment_score,
+                confidence=1.0,
+                entity_key="message:attachments",
+                attributes={"indicators": attachment_indicators},
+            ))
+        aggregated = aggregate_evidence(structured, thresholds or RISK_THRESHOLDS)
+        score = int(aggregated["score"])
         risk_level, _ = level_and_action(score, thresholds)
         result = dict(quick)
         result.update({"risk_score": score, "risk_level": risk_level, "action": "warn" if risk_level != "low" else "allow", "matched_rules": matched})
         result.setdefault("evidence", {})["authentication"] = authentication
         result["evidence"]["attachment_indicators"] = attachment_indicators
-        result["evidence"]["score_breakdown"] = score_breakdown
+        result["evidence"]["score_breakdown"] = {
+            item["rule_id"]: int(item["effective_weight"])
+            for item in aggregated["evidences"]
+            if int(item["effective_weight"])
+        }
+        result["evidence"]["evidences"] = aggregated["evidences"]
+        result["evidence"]["group_scores"] = aggregated["group_scores"]
+        result["evidence"]["calculation"] = aggregated["calculation"]
         return result
 
     @staticmethod

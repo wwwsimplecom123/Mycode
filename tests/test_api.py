@@ -3,6 +3,27 @@ import unittest
 from fastapi import HTTPException
 
 import app.api as api_module
+from shielddome.permissions import analysis_scope, has_permission, permissions_for_role
+
+
+class PermissionMatrixTests(unittest.TestCase):
+    def test_roles_separate_write_and_audit_capabilities(self):
+        analyst = {"id": "a1", "role": "analyst", "permissions": permissions_for_role("analyst")}
+        auditor = {"id": "u1", "role": "auditor", "permissions": permissions_for_role("auditor")}
+
+        self.assertTrue(has_permission(analyst, "analysis:feedback"))
+        self.assertFalse(has_permission(auditor, "analysis:feedback"))
+        self.assertTrue(has_permission(auditor, "audit:read:any"))
+        self.assertEqual(analysis_scope(analyst), {"kind": "self", "owner_user_id": "a1"})
+        self.assertEqual(analysis_scope(auditor), {"kind": "all"})
+        department = {
+            "id": "d1", "role": "analyst", "permissions": permissions_for_role("analyst"),
+            "data_scope": "department", "organization_id": "org-1", "department_id": "soc",
+        }
+        self.assertEqual(
+            analysis_scope(department),
+            {"kind": "department", "organization_id": "org-1", "department_id": "soc"},
+        )
 
 
 class DummyRequest:

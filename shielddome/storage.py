@@ -90,7 +90,54 @@ class Database:
                     connection.execute(statement)
             else:
                 connection.executescript(schema)
+        self._migrate_schema()
         self.seed_default_policies()
+
+    def _migrate_schema(self) -> None:
+        """Apply additive migrations for existing SQLite and PostgreSQL installs."""
+        columns = {
+            "owner_user_id": "TEXT",
+            "organization_id": "TEXT NOT NULL DEFAULT ''",
+            "department_id": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'private'",
+            "created_by_subject_type": "TEXT NOT NULL DEFAULT 'user'",
+            "created_by_subject_id": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self.connect() as connection:
+            if self._is_postgres:
+                for name, definition in columns.items():
+                    connection.execute(f"ALTER TABLE analyses ADD COLUMN IF NOT EXISTS {name} {definition}")
+                connection.execute("CREATE INDEX IF NOT EXISTS idx_analyses_owner_created ON analyses(owner_user_id, created_at DESC)")
+                connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS data_scope TEXT NOT NULL DEFAULT 'self'")
+                connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id TEXT NOT NULL DEFAULT ''")
+                connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS department_id TEXT NOT NULL DEFAULT ''")
+            else:
+                existing = {str(row[1]) for row in connection.execute("PRAGMA table_info(analyses)").fetchall()}
+                for name, definition in columns.items():
+                    if name not in existing:
+                        connection.execute(f"ALTER TABLE analyses ADD COLUMN {name} {definition}")
+                connection.execute("CREATE INDEX IF NOT EXISTS idx_analyses_owner_created ON analyses(owner_user_id, created_at DESC)")
+                user_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+                for name, definition in {
+                    "data_scope": "TEXT NOT NULL DEFAULT 'self'",
+                    "organization_id": "TEXT NOT NULL DEFAULT ''",
+                    "department_id": "TEXT NOT NULL DEFAULT ''",
+                }.items():
+                    if name not in user_columns:
+                        connection.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+                connection.execute("UPDATE users SET data_scope = 'all' WHERE role IN ('admin', 'auditor') AND data_scope = 'self'")
+        # Backfill the explicit owner once from legacy JSON. Unknown records remain restricted.
+        rows = self._fetchall("SELECT id, owner_user_id, parsed_message FROM analyses WHERE owner_user_id IS NULL", [])
+        for row in rows:
+            parsed = self._decode_json_fields(row, ["parsed_message"]).get("parsed_message") or {}
+            owner_id = str((parsed.get("submitted_by") or {}).get("id") or "")
+            if owner_id:
+                self._execute_direct(
+                    "UPDATE analyses SET owner_user_id = ?, created_by_subject_id = ? WHERE id = ?",
+                    [owner_id, owner_id, row["id"]],
+                )
+            else:
+                self._execute_direct("UPDATE analyses SET visibility = 'restricted' WHERE id = ?", [row["id"]])
 
     def seed_default_policies(self) -> None:
         defaults = [
@@ -106,15 +153,25 @@ class Database:
             for key, value in defaults:
                 self._insert_ignore(connection, "policies", ["key", "value", "updated_at"], [key, _json(value), utc_now()])
 
-    def create_analysis(self, source_name: str, raw_path: str, parsed: dict[str, Any], quick: dict[str, Any]) -> str:
+    def create_analysis(
+        self,
+        source_name: str,
+        raw_path: str,
+        parsed: dict[str, Any],
+        quick: dict[str, Any],
+        actor: dict[str, Any] | None = None,
+    ) -> str:
         analysis_id = str(uuid.uuid4())
         now = utc_now()
         with self.connect() as connection:
             self._insert(
                 connection,
                 "analyses",
-                ["id", "source_name", "status", "risk_level", "quick_result", "parsed_message", "raw_path", "created_at", "updated_at"],
-                [analysis_id, source_name, "queued", quick.get("risk_level", "low"), _json(quick), _json(parsed), raw_path, now, now],
+                ["id", "source_name", "status", "risk_level", "quick_result", "parsed_message", "raw_path", "owner_user_id", "organization_id", "department_id", "visibility", "created_by_subject_type", "created_by_subject_id", "created_at", "updated_at"],
+                [analysis_id, source_name, "queued", quick.get("risk_level", "low"), _json(quick), _json(parsed), raw_path,
+                 str((actor or {}).get("id") or "") or None, str((actor or {}).get("organization_id") or ""),
+                 str((actor or {}).get("department_id") or ""), "private" if actor else "restricted",
+                 str((actor or {}).get("subject_type") or "user"), str((actor or {}).get("id") or ""), now, now],
             )
             self._insert(
                 connection,
@@ -335,16 +392,29 @@ class Database:
         return [self._decode_analysis(row) for row in rows]
 
     def list_analyses_for_actor(self, user_id: str = "", username: str = "", limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        rows = self._fetchall("SELECT * FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
-        filtered = [item for item in (self._decode_analysis(row) for row in rows) if self._analysis_owned_by(item, user_id, username)]
-        offset = max(offset, 0)
-        return filtered[offset: offset + min(limit, 500)]
+        return self.list_analyses_by_scope({"kind": "self", "owner_user_id": user_id}, limit, offset)
+
+    def list_analyses_by_scope(self, scope: dict[str, str], limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        clause, params = self._analysis_scope_clause(scope)
+        rows = self._fetchall(
+            f"SELECT * FROM analyses {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            [*params, min(limit, 500), max(offset, 0)],
+        )
+        return [self._decode_analysis(row) for row in rows]
+
+    def dashboard_for_scope(self, scope: dict[str, str]) -> dict[str, Any]:
+        clause, params = self._analysis_scope_clause(scope)
+        rows = self._fetchall(f"SELECT risk_level, status, created_at FROM analyses {clause} ORDER BY created_at DESC", params)
+        return self._dashboard_from_rows(rows)
 
     def dashboard(self, user_id: str = "", username: str = "") -> dict[str, Any]:
-        rows = self._fetchall("SELECT risk_level, status, created_at, parsed_message FROM analyses ORDER BY created_at DESC LIMIT 5000", [])
-        if user_id or username:
-            rows = [self._decode_analysis(row) for row in rows]
-            rows = [row for row in rows if self._analysis_owned_by(row, user_id, username)]
+        if user_id:
+            rows = self._fetchall("SELECT risk_level, status, created_at FROM analyses WHERE owner_user_id = ? ORDER BY created_at DESC", [user_id])
+        else:
+            rows = self._fetchall("SELECT risk_level, status, created_at FROM analyses ORDER BY created_at DESC", [])
+        return self._dashboard_from_rows(rows)
+
+    def _dashboard_from_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         risk = {"low": 0, "medium": 0, "high": 0, "critical": 0}
         for row in rows:
             level = row.get("risk_level") or "low"
@@ -356,6 +426,17 @@ class Database:
             "degraded": sum(1 for row in rows if row.get("status") == "degraded"),
             "trend": self._daily_counts(rows),
         }
+
+    @staticmethod
+    def _analysis_scope_clause(scope: dict[str, str]) -> tuple[str, list[Any]]:
+        kind = str(scope.get("kind") or "self")
+        if kind == "all":
+            return "", []
+        if kind == "organization":
+            return "WHERE organization_id = ?", [str(scope.get("organization_id") or "")]
+        if kind == "department":
+            return "WHERE organization_id = ? AND department_id = ?", [str(scope.get("organization_id") or ""), str(scope.get("department_id") or "")]
+        return "WHERE owner_user_id = ?", [str(scope.get("owner_user_id") or "")]
 
     def queue_stats(self) -> dict[str, Any]:
         rows = self._fetchall("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status", [])
@@ -527,6 +608,63 @@ class Database:
             for row in self._fetchall(f"SELECT * FROM audit_logs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?", params)
         ]
 
+    def create_analysis_label(
+        self,
+        analysis_id: str,
+        label: str,
+        confidence: float,
+        user_id: str,
+        comment: str,
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        label_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connect() as connection:
+            self._execute(
+                connection,
+                "UPDATE analysis_labels SET status = 'superseded' WHERE analysis_id = ? AND labeled_by_user_id = ? AND status = 'pending'",
+                [analysis_id, user_id],
+            )
+            self._insert(
+                connection,
+                "analysis_labels",
+                ["id", "analysis_id", "label", "confidence", "status", "labeled_by_user_id", "comment", "source", "snapshot", "created_at"],
+                [label_id, analysis_id, label, confidence, "pending", user_id, comment[:1000], "console_feedback", _json(snapshot), now],
+            )
+        return self.get_analysis_label(label_id) or {}
+
+    def get_analysis_label(self, label_id: str) -> dict[str, Any] | None:
+        row = self._fetchone("SELECT * FROM analysis_labels WHERE id = ?", [label_id])
+        return self._decode_json_fields(row, ["snapshot"]) if row else None
+
+    def list_analysis_labels(self, status: str = "", limit: int = 200) -> list[dict[str, Any]]:
+        if status:
+            rows = self._fetchall(
+                "SELECT * FROM analysis_labels WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                [status, min(limit, 1000)],
+            )
+        else:
+            rows = self._fetchall("SELECT * FROM analysis_labels ORDER BY created_at DESC LIMIT ?", [min(limit, 1000)])
+        return [self._decode_json_fields(row, ["snapshot"]) for row in rows]
+
+    def review_analysis_label(self, label_id: str, status: str, reviewer_user_id: str) -> dict[str, Any] | None:
+        self._execute_direct(
+            "UPDATE analysis_labels SET status = ?, reviewed_by_user_id = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'",
+            [status, reviewer_user_id, utc_now(), label_id],
+        )
+        return self.get_analysis_label(label_id)
+
+    def confirmed_evaluation_dataset(self) -> list[dict[str, Any]]:
+        rows = self._fetchall(
+            """
+            SELECT analysis_labels.*, analyses.risk_level, analyses.quick_result, analyses.result
+            FROM analysis_labels JOIN analyses ON analyses.id = analysis_labels.analysis_id
+            WHERE analysis_labels.status = 'confirmed' ORDER BY analysis_labels.created_at
+            """,
+            [],
+        )
+        return [self._decode_json_fields(row, ["snapshot", "quick_result", "result"]) for row in rows]
+
     def get_policy(self, key: str, default: Any = None) -> Any:
         row = self._fetchone("SELECT value FROM policies WHERE key = ?", [key])
         if not row:
@@ -561,7 +699,7 @@ class Database:
     def list_users(self) -> list[dict[str, Any]]:
         rows = self._fetchall(
             """
-            SELECT id, username, display_name, role, disabled, failed_attempts,
+            SELECT id, username, display_name, role, data_scope, organization_id, department_id, disabled, failed_attempts,
                    lock_until, created_at, updated_at,
                    EXISTS(
                        SELECT 1 FROM plugin_tokens
@@ -765,7 +903,9 @@ SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS analyses (
   id TEXT PRIMARY KEY, source_name TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT,
   quick_result TEXT NOT NULL, parsed_message TEXT NOT NULL, result TEXT, raw_path TEXT,
-  error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  error TEXT, owner_user_id TEXT, organization_id TEXT NOT NULL DEFAULT '', department_id TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'private', created_by_subject_type TEXT NOT NULL DEFAULT 'user',
+  created_by_subject_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
@@ -787,10 +927,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
   details TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS analysis_labels (
+  id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, label TEXT NOT NULL, confidence REAL NOT NULL,
+  status TEXT NOT NULL, labeled_by_user_id TEXT NOT NULL, reviewed_by_user_id TEXT,
+  comment TEXT NOT NULL, source TEXT NOT NULL, snapshot TEXT NOT NULL,
+  created_at TEXT NOT NULL, reviewed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_analysis_labels_status ON analysis_labels(status, created_at);
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, display_name TEXT NOT NULL,
   role TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, failed_attempts INTEGER NOT NULL DEFAULT 0,
-  lock_until TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  lock_until TEXT, data_scope TEXT NOT NULL DEFAULT 'self', organization_id TEXT NOT NULL DEFAULT '',
+  department_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL,
@@ -814,7 +962,9 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS analyses (
   id UUID PRIMARY KEY, source_name TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT,
   quick_result JSONB NOT NULL, parsed_message JSONB NOT NULL, result JSONB, raw_path TEXT,
-  error TEXT, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+  error TEXT, owner_user_id TEXT, organization_id TEXT NOT NULL DEFAULT '', department_id TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'private', created_by_subject_type TEXT NOT NULL DEFAULT 'user',
+  created_by_subject_id TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY, analysis_id UUID NOT NULL REFERENCES analyses(id), status TEXT NOT NULL,
@@ -839,10 +989,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
   details JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL
 );
+CREATE TABLE IF NOT EXISTS analysis_labels (
+  id UUID PRIMARY KEY, analysis_id UUID NOT NULL REFERENCES analyses(id), label TEXT NOT NULL,
+  confidence DOUBLE PRECISION NOT NULL, status TEXT NOT NULL, labeled_by_user_id TEXT NOT NULL,
+  reviewed_by_user_id TEXT, comment TEXT NOT NULL, source TEXT NOT NULL, snapshot JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL, reviewed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_analysis_labels_status ON analysis_labels(status, created_at);
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, display_name TEXT NOT NULL,
   role TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, failed_attempts INTEGER NOT NULL DEFAULT 0,
-  lock_until TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+  lock_until TIMESTAMPTZ, data_scope TEXT NOT NULL DEFAULT 'self', organization_id TEXT NOT NULL DEFAULT '',
+  department_id TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL UNIQUE,

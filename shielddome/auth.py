@@ -11,6 +11,7 @@ from typing import Any
 
 from .settings import SETTINGS
 from .storage import Database
+from .permissions import has_permission, permissions_for_role
 
 
 def hash_password(password: str) -> str:
@@ -117,6 +118,8 @@ class AuthService:
             raise KeyError("用户不存在")
         if bool(user.get("disabled")):
             raise ValueError("不能为已停用用户签发插件 Token")
+        if not has_permission(self.public_user(user), "analysis:create"):
+            raise ValueError("该用户角色没有邮件检测提交权限")
         token = f"sdp_{secrets.token_urlsafe(32)}"
         prefix = token[:12]
         self.db.replace_user_plugin_token(user_id, self._token_hash(token), prefix)
@@ -134,6 +137,10 @@ class AuthService:
             "username": user["username"],
             "display_name": user["display_name"],
             "role": user["role"],
+            "permissions": permissions_for_role(str(user["role"])),
+            "data_scope": str(user.get("data_scope") or ("all" if user["role"] in {"admin", "auditor"} else "self")),
+            "organization_id": str(user.get("organization_id") or ""),
+            "department_id": str(user.get("department_id") or ""),
         }
 
     @staticmethod
@@ -153,6 +160,9 @@ class AuthService:
                 "plugin_token_configured",
                 "plugin_token_prefix",
                 "plugin_token_last_used_at",
+                "data_scope",
+                "organization_id",
+                "department_id",
             )
         }
 

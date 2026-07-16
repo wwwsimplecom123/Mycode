@@ -150,6 +150,36 @@ class EnterpriseTests(unittest.TestCase):
             self.assertEqual(migrated["owner_user_id"], "owner-1")
             self.assertEqual(migrated["visibility"], "private")
 
+    def test_legacy_user_scopes_migrate_to_permission_matrix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy-users.db"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """CREATE TABLE users (
+                id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+                display_name TEXT NOT NULL, role TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0,
+                failed_attempts INTEGER NOT NULL DEFAULT 0, lock_until TEXT,
+                data_scope TEXT NOT NULL DEFAULT 'self', organization_id TEXT NOT NULL DEFAULT '',
+                department_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )"""
+            )
+            now = "2026-01-01"
+            for role in ("admin", "auditor", "analyst"):
+                connection.execute(
+                    "INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [role, role, "hash", role, role, 0, 0, None, "self", "", "soc", now, now],
+                )
+            connection.commit()
+            connection.close()
+
+            database = Database(f"sqlite:///{path}")
+            database.initialize()
+
+            self.assertEqual(database.get_user_by_username("admin")["data_scope"], "all")
+            self.assertEqual(database.get_user_by_username("auditor")["data_scope"], "all_readonly")
+            self.assertEqual(database.get_user_by_username("analyst")["data_scope"], "team")
+            self.assertEqual(database.get_user_by_username("analyst")["security_team_id"], "soc")
+
     def test_offline_evaluation_reports_metrics_and_recommends_thresholds(self):
         rows = [
             {"label": "phishing", "snapshot": {"risk_score": 90}},
@@ -434,6 +464,7 @@ class EnterpriseTests(unittest.TestCase):
         managed = self.service.auth.create_user("analyst.one", "Analyst-Password-2026", "分析员一号", "analyst")
         login = self.service.auth.login("analyst.one", "Analyst-Password-2026")
         self.assertEqual(login["user"]["role"], "analyst")
+        self.assertEqual(login["user"]["data_scope"], "team")
         self.assertNotIn("password_hash", managed)
 
         self.service.auth.update_user(managed["id"], "分析员一号", "analyst", True)
@@ -448,6 +479,16 @@ class EnterpriseTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.service.auth.login("auditor.one", "Auditor-Password-2026")
         self.assertEqual(self.service.auth.login("auditor.one", "Auditor-New-Password-2026")["user"]["role"], "auditor")
+
+    def test_regular_user_can_receive_plugin_token_but_not_admin_permissions(self):
+        managed = self.service.auth.create_user("ordinary.user", "User-Password-2026", "Ordinary User", "user")
+        issued = self.service.auth.issue_plugin_token(managed["id"])
+        login = self.service.auth.login("ordinary.user", "User-Password-2026")
+
+        self.assertTrue(issued["token"].startswith("sdp_"))
+        self.assertEqual(login["user"]["data_scope"], "self")
+        self.assertIn("me:mail", login["user"]["permissions"])
+        self.assertNotIn("user:read", login["user"]["permissions"])
 
     def test_browser_probe_compatibility_analysis_completes(self):
         probe = AnalyzerService(deep_delay_seconds=0)

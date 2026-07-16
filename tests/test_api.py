@@ -3,7 +3,7 @@ import unittest
 from fastapi import HTTPException
 
 import app.api as api_module
-from shielddome.permissions import analysis_scope, has_permission, permissions_for_role
+from shielddome.permissions import analysis_scope, has_permission, is_readonly_actor, permissions_for_role
 
 
 class PermissionMatrixTests(unittest.TestCase):
@@ -14,16 +14,24 @@ class PermissionMatrixTests(unittest.TestCase):
         self.assertTrue(has_permission(analyst, "analysis:feedback"))
         self.assertFalse(has_permission(auditor, "analysis:feedback"))
         self.assertTrue(has_permission(auditor, "audit:read:any"))
-        self.assertEqual(analysis_scope(analyst), {"kind": "self", "owner_user_id": "a1"})
+        self.assertFalse(has_permission(auditor, "application:download"))
+        self.assertTrue(is_readonly_actor({**auditor, "data_scope": "all_readonly"}))
+        self.assertEqual(
+            analysis_scope(analyst),
+            {"kind": "team", "owner_user_id": "a1", "assigned_analyst_id": "a1", "security_team_id": ""},
+        )
         self.assertEqual(analysis_scope(auditor), {"kind": "all"})
         department = {
             "id": "d1", "role": "analyst", "permissions": permissions_for_role("analyst"),
-            "data_scope": "department", "organization_id": "org-1", "department_id": "soc",
+            "data_scope": "team", "organization_id": "org-1", "department_id": "soc", "security_team_id": "soc",
         }
         self.assertEqual(
             analysis_scope(department),
-            {"kind": "department", "organization_id": "org-1", "department_id": "soc"},
+            {"kind": "team", "owner_user_id": "d1", "assigned_analyst_id": "d1", "security_team_id": "soc"},
         )
+        regular = {"id": "u1", "role": "user", "permissions": permissions_for_role("user")}
+        self.assertTrue(has_permission(regular, "me:mail"))
+        self.assertEqual(analysis_scope(regular), {"kind": "self", "owner_user_id": "u1"})
 
 
 class DummyRequest:
@@ -141,6 +149,44 @@ class BrowserProbeApiTests(unittest.TestCase):
             api_module.ensure_analysis_visible(item, {"id": "owner-2", "username": "owner.two", "role": "analyst"})
 
         self.assertEqual(raised.exception.status_code, 403)
+
+    def test_team_visibility_allows_same_security_team_only(self):
+        item = {"owner_user_id": "owner-1", "security_team_id": "soc-a", "parsed_message": {"submitted_by": {"id": "owner-1"}}}
+
+        api_module.ensure_analysis_visible(item, {"id": "analyst-1", "role": "analyst", "data_scope": "team", "security_team_id": "soc-a"})
+        with self.assertRaises(HTTPException) as raised:
+            api_module.ensure_analysis_visible(item, {"id": "analyst-2", "role": "analyst", "data_scope": "team", "security_team_id": "soc-b"})
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_user_and_auditor_analysis_views_are_redacted(self):
+        item = {
+            "id": "a1",
+            "raw_path": "secret.eml",
+            "error": "worker stack",
+            "parsed_message": {
+                "subject": "Sensitive payment notice",
+                "sender": "alice@example.com",
+                "recipient": "bob@example.com",
+                "body_text": "secret body",
+                "headers": {"x": "y"},
+                "links": [{"href": "https://example.com/path?token=secret", "display_text": "secret", "html_snippet": "<a>"}],
+                "attachments": [{"filename": "payroll.xlsx", "sha256": "abc"}],
+            },
+            "quick_result": {"evidence": {"score_breakdown": {"x": 1}, "group_scores": {"x": 1}, "evidences": [{"rule_id": "x"}]}},
+            "result": {"llm": {"status": "completed", "model": "hidden"}, "rag": {"references": [{"excerpt": "hidden"}]}, "group_scores": {"x": 1}},
+        }
+
+        user_view = api_module.sanitize_analysis_for_actor(item, {"role": "user"})
+        auditor_view = api_module.sanitize_analysis_for_actor(item, {"role": "auditor"})
+
+        self.assertNotIn("raw_path", user_view)
+        self.assertNotIn("body_text", user_view["parsed_message"])
+        self.assertNotIn("group_scores", user_view["result"])
+        self.assertEqual(user_view["result"]["llm"], {"status": "completed", "error_type": ""})
+        self.assertNotIn("error", auditor_view)
+        self.assertEqual(auditor_view["data_view"], "redacted")
+        self.assertEqual(auditor_view["parsed_message"]["links"][0]["href"], "https://example.com/path")
 
     def test_bulk_knowledge_actions_call_each_item(self):
         service = FakeKnowledgeService()

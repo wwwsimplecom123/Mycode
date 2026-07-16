@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .config import BLACKLISTED_DOMAINS, HIGH_RISK_KEYWORDS, RISK_THRESHOLDS, TRUSTED_IP_RANGES, TRUSTED_ROOT_DOMAINS, TRUSTED_URLS
+from .permissions import default_data_scope_for_role
 from .settings import SETTINGS
 
 
@@ -99,6 +100,8 @@ class Database:
             "owner_user_id": "TEXT",
             "organization_id": "TEXT NOT NULL DEFAULT ''",
             "department_id": "TEXT NOT NULL DEFAULT ''",
+            "security_team_id": "TEXT NOT NULL DEFAULT ''",
+            "assigned_analyst_id": "TEXT NOT NULL DEFAULT ''",
             "visibility": "TEXT NOT NULL DEFAULT 'private'",
             "created_by_subject_type": "TEXT NOT NULL DEFAULT 'user'",
             "created_by_subject_id": "TEXT NOT NULL DEFAULT ''",
@@ -111,6 +114,13 @@ class Database:
                 connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS data_scope TEXT NOT NULL DEFAULT 'self'")
                 connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id TEXT NOT NULL DEFAULT ''")
                 connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS department_id TEXT NOT NULL DEFAULT ''")
+                connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS security_team_id TEXT NOT NULL DEFAULT ''")
+                connection.execute("UPDATE users SET data_scope = 'all' WHERE role = 'admin' AND data_scope IN ('self', 'organization', 'department', '')")
+                connection.execute("UPDATE users SET data_scope = 'all_readonly' WHERE role = 'auditor' AND data_scope IN ('self', 'organization', 'department', 'all', '')")
+                connection.execute("UPDATE users SET data_scope = 'team' WHERE role = 'analyst' AND data_scope IN ('self', 'organization', 'department', '')")
+                connection.execute("UPDATE users SET data_scope = 'self' WHERE role = 'user' AND data_scope IN ('organization', 'department', 'all', 'all_readonly', 'team', '')")
+                connection.execute("UPDATE users SET security_team_id = department_id WHERE security_team_id = '' AND department_id <> ''")
+                connection.execute("UPDATE analyses SET security_team_id = department_id WHERE security_team_id = '' AND department_id <> ''")
             else:
                 existing = {str(row[1]) for row in connection.execute("PRAGMA table_info(analyses)").fetchall()}
                 for name, definition in columns.items():
@@ -122,10 +132,16 @@ class Database:
                     "data_scope": "TEXT NOT NULL DEFAULT 'self'",
                     "organization_id": "TEXT NOT NULL DEFAULT ''",
                     "department_id": "TEXT NOT NULL DEFAULT ''",
+                    "security_team_id": "TEXT NOT NULL DEFAULT ''",
                 }.items():
                     if name not in user_columns:
                         connection.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
-                connection.execute("UPDATE users SET data_scope = 'all' WHERE role IN ('admin', 'auditor') AND data_scope = 'self'")
+                connection.execute("UPDATE users SET data_scope = 'all' WHERE role = 'admin' AND data_scope IN ('self', 'organization', 'department', '')")
+                connection.execute("UPDATE users SET data_scope = 'all_readonly' WHERE role = 'auditor' AND data_scope IN ('self', 'organization', 'department', 'all', '')")
+                connection.execute("UPDATE users SET data_scope = 'team' WHERE role = 'analyst' AND data_scope IN ('self', 'organization', 'department', '')")
+                connection.execute("UPDATE users SET data_scope = 'self' WHERE role = 'user' AND data_scope IN ('organization', 'department', 'all', 'all_readonly', 'team', '')")
+                connection.execute("UPDATE users SET security_team_id = department_id WHERE security_team_id = '' AND department_id <> ''")
+                connection.execute("UPDATE analyses SET security_team_id = department_id WHERE security_team_id = '' AND department_id <> ''")
         # Backfill the explicit owner once from legacy JSON. Unknown records remain restricted.
         rows = self._fetchall("SELECT id, owner_user_id, parsed_message FROM analyses WHERE owner_user_id IS NULL", [])
         for row in rows:
@@ -167,10 +183,11 @@ class Database:
             self._insert(
                 connection,
                 "analyses",
-                ["id", "source_name", "status", "risk_level", "quick_result", "parsed_message", "raw_path", "owner_user_id", "organization_id", "department_id", "visibility", "created_by_subject_type", "created_by_subject_id", "created_at", "updated_at"],
+                ["id", "source_name", "status", "risk_level", "quick_result", "parsed_message", "raw_path", "owner_user_id", "organization_id", "department_id", "security_team_id", "assigned_analyst_id", "visibility", "created_by_subject_type", "created_by_subject_id", "created_at", "updated_at"],
                 [analysis_id, source_name, "queued", quick.get("risk_level", "low"), _json(quick), _json(parsed), raw_path,
                  str((actor or {}).get("id") or "") or None, str((actor or {}).get("organization_id") or ""),
-                 str((actor or {}).get("department_id") or ""), "private" if actor else "restricted",
+                 str((actor or {}).get("department_id") or ""), str((actor or {}).get("security_team_id") or (actor or {}).get("department_id") or ""),
+                 str((actor or {}).get("assigned_analyst_id") or ""), "private" if actor else "restricted",
                  str((actor or {}).get("subject_type") or "user"), str((actor or {}).get("id") or ""), now, now],
             )
             self._insert(
@@ -432,6 +449,17 @@ class Database:
         kind = str(scope.get("kind") or "self")
         if kind == "all":
             return "", []
+        if kind == "team":
+            if not str(scope.get("security_team_id") or ""):
+                return "WHERE owner_user_id = ? OR assigned_analyst_id = ?", [
+                    str(scope.get("owner_user_id") or ""),
+                    str(scope.get("assigned_analyst_id") or ""),
+                ]
+            return "WHERE owner_user_id = ? OR assigned_analyst_id = ? OR security_team_id = ?", [
+                str(scope.get("owner_user_id") or ""),
+                str(scope.get("assigned_analyst_id") or ""),
+                str(scope.get("security_team_id") or ""),
+            ]
         if kind == "organization":
             return "WHERE organization_id = ?", [str(scope.get("organization_id") or "")]
         if kind == "department":
@@ -686,8 +714,8 @@ class Database:
             self._insert_ignore(
                 connection,
                 "users",
-                ["id", "username", "password_hash", "display_name", "role", "disabled", "failed_attempts", "created_at", "updated_at"],
-                [str(uuid.uuid4()), username, password_hash, display_name, role, 0, 0, now, now],
+                ["id", "username", "password_hash", "display_name", "role", "disabled", "failed_attempts", "data_scope", "created_at", "updated_at"],
+                [str(uuid.uuid4()), username, password_hash, display_name, role, 0, 0, default_data_scope_for_role(role), now, now],
             )
 
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
@@ -699,7 +727,7 @@ class Database:
     def list_users(self) -> list[dict[str, Any]]:
         rows = self._fetchall(
             """
-            SELECT id, username, display_name, role, data_scope, organization_id, department_id, disabled, failed_attempts,
+            SELECT id, username, display_name, role, data_scope, organization_id, department_id, security_team_id, disabled, failed_attempts,
                    lock_until, created_at, updated_at,
                    EXISTS(
                        SELECT 1 FROM plugin_tokens
@@ -731,15 +759,15 @@ class Database:
             self._insert(
                 connection,
                 "users",
-                ["id", "username", "password_hash", "display_name", "role", "disabled", "failed_attempts", "created_at", "updated_at"],
-                [user_id, username, password_hash, display_name, role, 0, 0, now, now],
+                ["id", "username", "password_hash", "display_name", "role", "disabled", "failed_attempts", "data_scope", "created_at", "updated_at"],
+                [user_id, username, password_hash, display_name, role, 0, 0, default_data_scope_for_role(role), now, now],
             )
         return self.get_user_by_id(user_id) or {}
 
     def update_user(self, user_id: str, display_name: str, role: str, disabled: bool) -> dict[str, Any] | None:
         self._execute_direct(
-            "UPDATE users SET display_name = ?, role = ?, disabled = ?, updated_at = ? WHERE id = ?",
-            [display_name, role, int(disabled), utc_now(), user_id],
+            "UPDATE users SET display_name = ?, role = ?, data_scope = ?, disabled = ?, updated_at = ? WHERE id = ?",
+            [display_name, role, default_data_scope_for_role(role), int(disabled), utc_now(), user_id],
         )
         if disabled:
             self.revoke_user_sessions(user_id)
@@ -904,6 +932,7 @@ CREATE TABLE IF NOT EXISTS analyses (
   id TEXT PRIMARY KEY, source_name TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT,
   quick_result TEXT NOT NULL, parsed_message TEXT NOT NULL, result TEXT, raw_path TEXT,
   error TEXT, owner_user_id TEXT, organization_id TEXT NOT NULL DEFAULT '', department_id TEXT NOT NULL DEFAULT '',
+  security_team_id TEXT NOT NULL DEFAULT '', assigned_analyst_id TEXT NOT NULL DEFAULT '',
   visibility TEXT NOT NULL DEFAULT 'private', created_by_subject_type TEXT NOT NULL DEFAULT 'user',
   created_by_subject_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -938,7 +967,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, display_name TEXT NOT NULL,
   role TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, failed_attempts INTEGER NOT NULL DEFAULT 0,
   lock_until TEXT, data_scope TEXT NOT NULL DEFAULT 'self', organization_id TEXT NOT NULL DEFAULT '',
-  department_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  department_id TEXT NOT NULL DEFAULT '', security_team_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL,
@@ -963,6 +992,7 @@ CREATE TABLE IF NOT EXISTS analyses (
   id UUID PRIMARY KEY, source_name TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT,
   quick_result JSONB NOT NULL, parsed_message JSONB NOT NULL, result JSONB, raw_path TEXT,
   error TEXT, owner_user_id TEXT, organization_id TEXT NOT NULL DEFAULT '', department_id TEXT NOT NULL DEFAULT '',
+  security_team_id TEXT NOT NULL DEFAULT '', assigned_analyst_id TEXT NOT NULL DEFAULT '',
   visibility TEXT NOT NULL DEFAULT 'private', created_by_subject_type TEXT NOT NULL DEFAULT 'user',
   created_by_subject_id TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
 );
@@ -1000,7 +1030,7 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, display_name TEXT NOT NULL,
   role TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0, failed_attempts INTEGER NOT NULL DEFAULT 0,
   lock_until TIMESTAMPTZ, data_scope TEXT NOT NULL DEFAULT 'self', organization_id TEXT NOT NULL DEFAULT '',
-  department_id TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+  department_id TEXT NOT NULL DEFAULT '', security_team_id TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL UNIQUE,

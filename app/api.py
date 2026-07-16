@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shielddome.enterprise import EnterpriseService  # noqa: E402
-from shielddome.permissions import analysis_scope, has_permission  # noqa: E402
+from shielddome.permissions import analysis_scope, has_permission, is_readonly_actor  # noqa: E402
 from shielddome.settings import SETTINGS  # noqa: E402
 
 
@@ -76,6 +76,9 @@ class KnowledgeTextRequest(BaseModel):
 
 class KnowledgeBulkRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 class PolicyRequest(BaseModel):
@@ -90,6 +93,9 @@ class DetectionPolicyRequest(BaseModel):
     high_risk_keywords: list[str]
     risk_thresholds: dict[str, int]
     trusted_include_subdomains: bool = True
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 class ProviderRequest(BaseModel):
@@ -100,6 +106,9 @@ class ProviderRequest(BaseModel):
     timeout: float | None = None
     api_key: str | None = Field(default=None, max_length=500)
     clear_api_key: bool = False
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -110,21 +119,36 @@ class CreateUserRequest(BaseModel):
     username: str = Field(pattern=r"^[a-zA-Z0-9._-]{3,64}$")
     display_name: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=12, max_length=300)
-    role: str = Field(pattern="^(admin|analyst|auditor)$")
+    role: str = Field(pattern="^(user|admin|analyst|auditor)$")
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 class UpdateUserRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
-    role: str = Field(pattern="^(admin|analyst|auditor)$")
+    role: str = Field(pattern="^(user|admin|analyst|auditor)$")
     disabled: bool = False
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 class ResetPasswordRequest(BaseModel):
     password: str = Field(min_length=12, max_length=300)
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 class ReviewLabelRequest(BaseModel):
     status: str = Field(pattern="^(confirmed|rejected)$")
+
+
+class DangerousActionRequest(BaseModel):
+    confirm_password: str = ""
+    confirm_reason: str = ""
+    request_trace_id: str = ""
 
 
 def bearer_token(authorization: str) -> str:
@@ -179,7 +203,7 @@ def require_console_actor(
     shielddome_session: str = Cookie(default=""),
 ) -> dict[str, Any]:
     user = SERVICE.auth.authenticate(session_token(authorization, shielddome_session))
-    if user and user.get("role") in {"admin", "analyst", "auditor"}:
+    if user and user.get("role") in {"user", "admin", "analyst", "auditor"}:
         return user
     if ADMIN_TOKEN and x_api_key == ADMIN_TOKEN:
         return {"id": "api-admin", "username": "api-admin", "display_name": "API Admin", "role": "admin"}
@@ -196,9 +220,19 @@ def require_permission(permission: str) -> Callable[..., dict[str, Any]]:
         actor = require_console_actor(authorization, x_api_key, shielddome_session)
         if not has_permission(actor, permission):
             raise HTTPException(status_code=403, detail=f"缺少操作权限：{permission}")
+        if is_readonly_actor(actor) and not is_read_permission(permission):
+            raise HTTPException(status_code=403, detail="auditor is read-only")
         return actor
 
     return dependency
+
+
+def is_read_permission(permission: str) -> bool:
+    return (
+        ":read" in permission
+        or permission in {"audit:export", "provider:test", "application:download"}
+        or permission.startswith("me:")
+    )
 
 
 def require_ingest(
@@ -282,9 +316,131 @@ def actor_username(actor: dict[str, Any]) -> str:
     return str(actor.get("username") or "")
 
 
-def ensure_analysis_visible(item: dict[str, Any], actor: dict[str, Any]) -> None:
-    if analysis_scope(actor)["kind"] == "all":
+def actor_name(actor: dict[str, Any] | str) -> str:
+    return actor_username(actor) if isinstance(actor, dict) else str(actor)
+
+
+def require_dangerous_confirmation(actor: dict[str, Any] | str, request: Any, action: str, target: str) -> None:
+    if not isinstance(actor, dict):
         return
+    if not has_permission(actor, "dangerous:confirm"):
+        raise HTTPException(status_code=403, detail="missing dangerous operation permission")
+    password = str(getattr(request, "confirm_password", "") or "")
+    reason = str(getattr(request, "confirm_reason", "") or "").strip()
+    trace_id = str(getattr(request, "request_trace_id", "") or "").strip()
+    if len(reason) < 3 or not password:
+        SERVICE.db.record_audit(actor_username(actor), "dangerous_confirmation.missing", target, {"action": action, "trace_id": trace_id})
+        raise HTTPException(status_code=400, detail="dangerous operation requires password and reason")
+    if not SERVICE.auth.verify_user_password(str(actor.get("id") or ""), password):
+        SERVICE.db.record_audit(actor_username(actor), "dangerous_confirmation.failed", target, {"action": action, "trace_id": trace_id})
+        raise HTTPException(status_code=403, detail="dangerous operation confirmation failed")
+    SERVICE.db.record_audit(actor_username(actor), "dangerous_confirmation.accepted", target, {"action": action, "reason": reason[:300], "trace_id": trace_id})
+
+
+def public_provider_config(config: dict[str, Any]) -> dict[str, Any]:
+    result = dict(config)
+    if result.get("api_key_masked"):
+        result["api_key_masked"] = "configured"
+    return result
+
+
+def public_system_status(status: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+    if has_permission(actor, "system:read:full"):
+        return status
+    provider = status.get("provider") or {}
+    return {
+        "service": status.get("service") or {},
+        "queue": status.get("queue") or {},
+        "provider": {"configured": bool(provider.get("configured")), "configuration_error": provider.get("configuration_error") or ""},
+        "database": {"status": (status.get("database") or {}).get("status", "unknown")},
+    }
+
+
+def sanitize_analysis_for_actor(item: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+    role = str(actor.get("role") or "")
+    result = json.loads(json.dumps(item, ensure_ascii=False, default=str))
+    if role == "admin":
+        result.pop("raw_path", None)
+        return result
+    result.pop("raw_path", None)
+    if role in {"user", "auditor"}:
+        result.pop("error", None)
+    parsed = result.get("parsed_message") or {}
+    if role == "user":
+        parsed.pop("headers", None)
+        parsed.pop("body_text", None)
+        for attachment in parsed.get("attachments") or []:
+            attachment.pop("sha256", None)
+        for source in (result.get("quick_result") or {}, result.get("result") or {}):
+            evidence = source.get("evidence") or {}
+            for key in ("score_breakdown", "evidences", "group_scores", "policy_summary"):
+                evidence.pop(key, None)
+            source.pop("evidences", None)
+            source.pop("group_scores", None)
+            if isinstance(source.get("rag"), dict):
+                source["rag"].pop("references", None)
+            if isinstance(source.get("llm"), dict):
+                source["llm"] = {"status": source["llm"].get("status"), "error_type": source["llm"].get("error_type", "")}
+    if role == "auditor":
+        parsed["subject"] = redact_text(parsed.get("subject"))
+        parsed["sender"] = redact_email(parsed.get("sender"))
+        parsed["recipient"] = redact_text(parsed.get("recipient"))
+        parsed.pop("body_text", None)
+        parsed.pop("headers", None)
+        for link in parsed.get("links") or []:
+            link.pop("display_text", None)
+            link.pop("html_snippet", None)
+            link["href"] = strip_query(link.get("href"))
+        for attachment in parsed.get("attachments") or []:
+            attachment["filename"] = redact_filename(attachment.get("filename"))
+            attachment.pop("sha256", None)
+    result["parsed_message"] = parsed
+    result["data_view"] = "redacted" if role == "auditor" else "scoped"
+    return result
+
+
+def redact_text(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    return text[:2] + "***" if len(text) > 2 else "***"
+
+
+def redact_email(value: Any) -> str:
+    text = str(value or "")
+    if "@" not in text:
+        return redact_text(text)
+    local, domain = text.rsplit("@", 1)
+    return f"{local[:1]}***@{domain}"
+
+
+def strip_query(value: Any) -> str:
+    try:
+        parsed = urlsplit(str(value or ""))
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    except ValueError:
+        return ""
+
+
+def redact_filename(value: Any) -> str:
+    name = str(value or "")
+    if "." not in name:
+        return redact_text(name)
+    stem, ext = name.rsplit(".", 1)
+    return f"{redact_text(stem)}.{ext}"
+
+
+def ensure_analysis_visible(item: dict[str, Any], actor: dict[str, Any]) -> None:
+    scope = analysis_scope(actor)
+    if scope["kind"] == "all":
+        return
+    if scope["kind"] == "team":
+        if str(item.get("owner_user_id") or "") == str(actor.get("id") or ""):
+            return
+        if str(item.get("assigned_analyst_id") or "") == str(actor.get("id") or ""):
+            return
+        if str(item.get("security_team_id") or "") and str(item.get("security_team_id") or "") == str(actor.get("security_team_id") or actor.get("department_id") or ""):
+            return
     if str(item.get("owner_user_id") or "") == str(actor.get("id") or ""):
         return
     submitted = (item.get("parsed_message") or {}).get("submitted_by") or {}
@@ -340,6 +496,52 @@ def logout(
         SERVICE.auth.logout(token)
     response.delete_cookie("shielddome_session", path="/", samesite="strict")
     return {"status": "logged_out"}
+
+
+@app.get("/api/me/dashboard")
+def me_dashboard(actor: dict[str, Any] = Depends(require_permission("me:dashboard"))) -> dict[str, Any]:
+    return SERVICE.db.dashboard_for_scope({"kind": "self", "owner_user_id": str(actor.get("id") or "")})
+
+
+@app.get("/api/me/alerts")
+def me_alerts(actor: dict[str, Any] = Depends(require_permission("me:alerts"))) -> dict[str, Any]:
+    items = SERVICE.db.list_analyses_by_scope({"kind": "self", "owner_user_id": str(actor.get("id") or "")}, 100, 0)
+    alerts = [item for item in items if item.get("risk_level") in {"medium", "high", "critical"} or item.get("status") == "failed"]
+    return {"items": [sanitize_analysis_for_actor(item, actor) for item in alerts]}
+
+
+@app.get("/api/me/mail-events")
+def me_mail_events(actor: dict[str, Any] = Depends(require_permission("me:mail"))) -> dict[str, Any]:
+    items = SERVICE.db.list_analyses_by_scope({"kind": "self", "owner_user_id": str(actor.get("id") or "")}, 200, 0)
+    return {"items": [sanitize_analysis_for_actor(item, actor) for item in items]}
+
+
+@app.get("/api/me/mail-events/{event_id}")
+def me_mail_event_detail(event_id: str, actor: dict[str, Any] = Depends(require_permission("me:mail"))) -> dict[str, Any]:
+    item = SERVICE.db.get_analysis(event_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    ensure_analysis_visible(item, actor)
+    return sanitize_analysis_for_actor(item, actor)
+
+
+@app.get("/api/me/plugin-token")
+def me_plugin_token(actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, Any]:
+    user_id = str(actor.get("id") or "")
+    items = [item for item in SERVICE.db.list_users() if str(item.get("id") or "") == user_id]
+    if not items:
+        raise HTTPException(status_code=404, detail="User not found")
+    item = items[0]
+    return {
+        "configured": bool(item.get("plugin_token_configured")),
+        "token_prefix": item.get("plugin_token_prefix") or "",
+        "last_used_at": item.get("plugin_token_last_used_at") or "",
+    }
+
+
+@app.get("/api/me/audit-logs")
+def me_audit_logs(actor: dict[str, Any] = Depends(require_permission("audit:read:self"))) -> dict[str, Any]:
+    return {"items": SERVICE.db.list_audit(200, actor_username(actor))}
 
 
 @app.post("/api/email/analyze/quick")
@@ -436,7 +638,8 @@ def list_analyses(page: int = 1, limit: int = 100, actor: dict[str, Any] = Depen
     page = max(page, 1)
     limit = min(max(limit, 1), 500)
     offset = (page - 1) * limit
-    return {"items": SERVICE.db.list_analyses_by_scope(analysis_scope(actor), limit, offset), "page": page, "limit": limit}
+    items = SERVICE.db.list_analyses_by_scope(analysis_scope(actor), limit, offset)
+    return {"items": [sanitize_analysis_for_actor(item, actor) for item in items], "page": page, "limit": limit}
 
 
 @app.get("/api/v1/analyses/{analysis_id}")
@@ -445,7 +648,7 @@ def get_analysis(analysis_id: str, actor: dict[str, Any] = Depends(require_permi
     if not item:
         raise HTTPException(status_code=404, detail="Analysis not found")
     ensure_analysis_visible(item, actor)
-    return item
+    return sanitize_analysis_for_actor(item, actor)
 
 
 @app.post("/api/v1/analyses/{analysis_id}/retry")
@@ -472,17 +675,17 @@ def feedback(analysis_id: str, request: FeedbackRequest, actor: dict[str, Any] =
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get("/api/v1/labels", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/labels", dependencies=[Depends(require_permission("audit:read:any"))])
 def list_analysis_labels(status: str = "", limit: int = 200) -> dict[str, Any]:
     return {"items": SERVICE.db.list_analysis_labels(status, min(max(limit, 1), 1000))}
 
 
 @app.post("/api/v1/labels/{label_id}/review")
-def review_analysis_label(label_id: str, request: ReviewLabelRequest, actor: str = Depends(require_admin)) -> dict[str, Any]:
-    item = SERVICE.db.review_analysis_label(label_id, request.status, actor)
+def review_analysis_label(label_id: str, request: ReviewLabelRequest, actor: dict[str, Any] = Depends(require_permission("analysis:review"))) -> dict[str, Any]:
+    item = SERVICE.db.review_analysis_label(label_id, request.status, actor_username(actor))
     if not item:
         raise HTTPException(status_code=404, detail="Label not found")
-    SERVICE.db.record_audit(actor, "analysis.label_reviewed", label_id, {"status": request.status})
+    SERVICE.db.record_audit(actor_username(actor), "analysis.label_reviewed", label_id, {"status": request.status})
     return item
 
 
@@ -491,7 +694,7 @@ async def import_knowledge_file(
     file: UploadFile = File(...),
     source_type: str = Form(...),
     title: str = Form(default=""),
-    _actor: str = Depends(require_admin),
+    _actor: dict[str, Any] = Depends(require_permission("knowledge:draft:create")),
 ) -> dict[str, Any]:
     raw = await file.read()
     if len(raw) > 10 * 1024 * 1024:
@@ -511,17 +714,21 @@ async def import_knowledge_file(
             content = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages)
         else:
             raise ValueError("Supported knowledge files: .eml, .txt, .md, .csv, .pdf")
-        return SERVICE.import_knowledge(title or name, source_type, content, {"filename": name})
+        result = SERVICE.import_knowledge(title or name, source_type, content, {"filename": name, "created_by": actor_username(_actor)})
+        SERVICE.db.record_audit(actor_username(_actor), "knowledge.imported_by_user", str(result.get("id") or ""), {"filename": name})
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/knowledge/text")
-def import_knowledge_text(request: KnowledgeTextRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
-    return SERVICE.import_knowledge(request.title, request.source_type, request.content, request.metadata)
+def import_knowledge_text(request: KnowledgeTextRequest, _actor: dict[str, Any] = Depends(require_permission("knowledge:draft:create"))) -> dict[str, Any]:
+    metadata = dict(request.metadata or {})
+    metadata["created_by"] = actor_username(_actor)
+    return SERVICE.import_knowledge(request.title, request.source_type, request.content, metadata)
 
 
-@app.get("/api/v1/knowledge", dependencies=[Depends(require_permission("knowledge:read"))])
+@app.get("/api/v1/knowledge", dependencies=[Depends(require_permission("knowledge:read:published"))])
 def list_knowledge(
     page: int = 1,
     limit: int = 50,
@@ -541,7 +748,7 @@ def list_knowledge(
     return {**result, "page": page, "limit": limit, "stats": SERVICE.db.knowledge_stats()}
 
 
-@app.get("/api/v1/knowledge/{item_id}", dependencies=[Depends(require_permission("knowledge:read"))])
+@app.get("/api/v1/knowledge/{item_id}", dependencies=[Depends(require_permission("knowledge:read:published"))])
 def knowledge_detail(item_id: str) -> dict[str, Any]:
     item = SERVICE.db.get_knowledge(item_id)
     if not item:
@@ -550,17 +757,20 @@ def knowledge_detail(item_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/knowledge/{item_id}/approve")
-def approve_knowledge(item_id: str, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def approve_knowledge(item_id: str, request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:approve"))) -> dict[str, Any]:
+    require_dangerous_confirmation(_actor, request or DangerousActionRequest(), "knowledge.approve", item_id)
     return SERVICE.approve_knowledge(item_id)
 
 
 @app.post("/api/v1/knowledge/{item_id}/disable")
-def disable_knowledge(item_id: str, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def disable_knowledge(item_id: str, request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:disable"))) -> dict[str, Any]:
+    require_dangerous_confirmation(_actor, request or DangerousActionRequest(), "knowledge.disable", item_id)
     return SERVICE.disable_knowledge(item_id)
 
 
 @app.post("/api/v1/knowledge/bulk-approve")
-def bulk_approve_knowledge(request: KnowledgeBulkRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def bulk_approve_knowledge(request: KnowledgeBulkRequest, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:approve"))) -> dict[str, Any]:
+    require_dangerous_confirmation(_actor, request, "knowledge.bulk_approve", "knowledge")
     completed = 0
     failed: list[dict[str, str]] = []
     for item_id in request.ids:
@@ -573,7 +783,8 @@ def bulk_approve_knowledge(request: KnowledgeBulkRequest, _actor: str = Depends(
 
 
 @app.post("/api/v1/knowledge/bulk-disable")
-def bulk_disable_knowledge(request: KnowledgeBulkRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def bulk_disable_knowledge(request: KnowledgeBulkRequest, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:disable"))) -> dict[str, Any]:
+    require_dangerous_confirmation(_actor, request, "knowledge.bulk_disable", "knowledge")
     completed = 0
     failed: list[dict[str, str]] = []
     for item_id in request.ids:
@@ -586,30 +797,32 @@ def bulk_disable_knowledge(request: KnowledgeBulkRequest, _actor: str = Depends(
 
 
 @app.post("/api/v1/knowledge/reindex")
-def reindex_knowledge(_actor: str = Depends(require_admin)) -> dict[str, Any]:
+def reindex_knowledge(request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:reindex"))) -> dict[str, Any]:
+    require_dangerous_confirmation(_actor, request or DangerousActionRequest(), "knowledge.reindex", "knowledge")
     return SERVICE.reindex_knowledge()
 
 
-@app.get("/api/v1/knowledge/search", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/knowledge/search", dependencies=[Depends(require_permission("knowledge:read:published"))])
 def search_knowledge(q: str, limit: int = 5) -> dict[str, Any]:
     return {"items": SERVICE.search_knowledge(q, limit)}
 
 
 @app.get("/api/v1/settings/providers", dependencies=[Depends(require_permission("provider:read"))])
 def provider_settings() -> dict[str, Any]:
-    return SERVICE.provider_config()
+    return public_provider_config(SERVICE.provider_config())
 
 
 @app.put("/api/v1/settings/providers")
-def update_provider_settings(request: ProviderRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def update_provider_settings(request: ProviderRequest, _actor: dict[str, Any] = Depends(require_permission("provider:update"))) -> dict[str, Any]:
+    require_dangerous_confirmation(_actor, request, "provider.update", "provider")
     try:
-        return SERVICE.configure_provider(request.model_dump(exclude_none=True))
+        return public_provider_config(SERVICE.configure_provider(request.model_dump(exclude_none=True)))
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/settings/providers/test")
-def test_provider_settings(_actor: str = Depends(require_admin)) -> dict[str, Any]:
+def test_provider_settings(_actor: dict[str, Any] = Depends(require_permission("provider:test"))) -> dict[str, Any]:
     return SERVICE.test_provider()
 
 
@@ -619,14 +832,15 @@ def detection_policy_settings() -> dict[str, Any]:
 
 
 @app.put("/api/v1/settings/detection-policy")
-def update_detection_policy(request: DetectionPolicyRequest, actor: str = Depends(require_admin)) -> dict[str, Any]:
+def update_detection_policy(request: DetectionPolicyRequest, actor: dict[str, Any] = Depends(require_permission("policy:update"))) -> dict[str, Any]:
+    require_dangerous_confirmation(actor, request, "policy.update", "detection_policy")
     try:
-        return SERVICE.configure_detection_policy(request.model_dump(), actor)
+        return SERVICE.configure_detection_policy(request.model_dump(), actor_username(actor))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/v1/policies/{key}", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/policies/{key}", dependencies=[Depends(require_permission("policy:read"))])
 def get_policy(key: str) -> dict[str, Any]:
     if key == "provider_secret":
         raise HTTPException(status_code=403, detail="敏感密钥策略不可通过通用策略接口读取")
@@ -634,7 +848,7 @@ def get_policy(key: str) -> dict[str, Any]:
 
 
 @app.put("/api/v1/policies/{key}")
-def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_admin)) -> dict[str, Any]:
+def put_policy(key: str, request: PolicyRequest, _actor: dict[str, Any] = Depends(require_permission("policy:update"))) -> dict[str, Any]:
     protected = {
         "provider_secret",
         "trusted_domains",
@@ -647,7 +861,7 @@ def put_policy(key: str, request: PolicyRequest, _actor: str = Depends(require_a
     if key in protected:
         raise HTTPException(status_code=403, detail="该策略必须通过专用设置接口修改")
     SERVICE.db.set_policy(key, request.value)
-    SERVICE.db.record_audit("admin", "policy.updated", key)
+    SERVICE.db.record_audit(actor_username(_actor), "policy.updated", key)
     return {"key": key, "value": request.value}
 
 
@@ -661,36 +875,39 @@ def audit(page: int = 1, limit: int = 200, actor: dict[str, Any] = Depends(requi
     return {"items": SERVICE.db.list_audit(limit, actor_username(actor), offset), "page": page, "limit": limit}
 
 
-@app.get("/api/v1/system/status", dependencies=[Depends(require_permission("system:read"))])
-def system_status() -> dict[str, Any]:
-    return SERVICE.system_status()
+@app.get("/api/v1/system/status")
+def system_status(actor: dict[str, Any] = Depends(require_permission("system:read"))) -> dict[str, Any]:
+    return public_system_status(SERVICE.system_status(), actor)
 
 
-@app.get("/api/v1/users", dependencies=[Depends(require_admin)])
+@app.get("/api/v1/users", dependencies=[Depends(require_permission("user:read"))])
 def list_users() -> dict[str, Any]:
     return {"items": [SERVICE.auth.public_managed_user(item) for item in SERVICE.db.list_users()]}
 
 
 @app.post("/api/v1/users", status_code=201)
-def create_user(request: CreateUserRequest, actor: str = Depends(require_admin)) -> dict[str, Any]:
+def create_user(request: CreateUserRequest, actor: dict[str, Any] = Depends(require_permission("user:create"))) -> dict[str, Any]:
+    require_dangerous_confirmation(actor, request, "user.create", request.username)
     try:
         user = SERVICE.auth.create_user(request.username, request.password, request.display_name, request.role)
-        plugin_token = SERVICE.auth.issue_plugin_token(str(user["id"]))
-        SERVICE.db.record_audit(actor, "user.created", str(user["id"]), {"username": user["username"], "role": user["role"]})
-        SERVICE.db.record_audit(actor, "user.plugin_token_issued", str(user["id"]), {"username": user["username"]})
+        plugin_token = SERVICE.auth.issue_plugin_token(str(user["id"])) if has_permission({"role": request.role}, "analysis:create") else {"token": "", "token_masked": ""}
+        SERVICE.db.record_audit(actor_username(actor), "user.created", str(user["id"]), {"username": user["username"], "role": user["role"]})
+        if plugin_token["token"]:
+            SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_issued", str(user["id"]), {"username": user["username"]})
         return {**user, "plugin_token": plugin_token["token"], "plugin_token_masked": plugin_token["token_masked"]}
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.put("/api/v1/users/{user_id}")
-def update_user(user_id: str, request: UpdateUserRequest, actor: str = Depends(require_admin)) -> dict[str, Any]:
+def update_user(user_id: str, request: UpdateUserRequest, actor: dict[str, Any] = Depends(require_permission("user:update"))) -> dict[str, Any]:
+    require_dangerous_confirmation(actor, request, "user.update", user_id)
     target = SERVICE.db.get_user_by_id(user_id)
-    if target and target["username"] == actor and request.disabled:
+    if target and target["username"] == actor_username(actor) and request.disabled:
         raise HTTPException(status_code=400, detail="不能停用当前登录账号")
     try:
         user = SERVICE.auth.update_user(user_id, request.display_name, request.role, request.disabled)
-        SERVICE.db.record_audit(actor, "user.updated", user_id, {"role": request.role, "disabled": request.disabled})
+        SERVICE.db.record_audit(actor_username(actor), "user.updated", user_id, {"role": request.role, "disabled": request.disabled})
         return user
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -699,10 +916,11 @@ def update_user(user_id: str, request: UpdateUserRequest, actor: str = Depends(r
 
 
 @app.post("/api/v1/users/{user_id}/reset-password")
-def reset_user_password(user_id: str, request: ResetPasswordRequest, actor: str = Depends(require_admin)) -> dict[str, str]:
+def reset_user_password(user_id: str, request: ResetPasswordRequest, actor: dict[str, Any] = Depends(require_permission("user:reset_password"))) -> dict[str, str]:
+    require_dangerous_confirmation(actor, request, "user.reset_password", user_id)
     try:
         SERVICE.auth.reset_password(user_id, request.password)
-        SERVICE.db.record_audit(actor, "user.password_reset", user_id)
+        SERVICE.db.record_audit(actor_username(actor), "user.password_reset", user_id)
         return {"status": "password_reset"}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -711,10 +929,11 @@ def reset_user_password(user_id: str, request: ResetPasswordRequest, actor: str 
 
 
 @app.post("/api/v1/users/{user_id}/plugin-token")
-def rotate_user_plugin_token(user_id: str, actor: str = Depends(require_admin)) -> dict[str, str]:
+def rotate_user_plugin_token(user_id: str, request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
+    require_dangerous_confirmation(actor, request or DangerousActionRequest(), "user.plugin_token_rotate", user_id)
     try:
         issued = SERVICE.auth.issue_plugin_token(user_id)
-        SERVICE.db.record_audit(actor, "user.plugin_token_rotated", user_id)
+        SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_rotated", user_id)
         return issued
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -723,10 +942,11 @@ def rotate_user_plugin_token(user_id: str, actor: str = Depends(require_admin)) 
 
 
 @app.delete("/api/v1/users/{user_id}/plugin-token")
-def revoke_user_plugin_token(user_id: str, actor: str = Depends(require_admin)) -> dict[str, str]:
+def revoke_user_plugin_token(user_id: str, request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
+    require_dangerous_confirmation(actor, request or DangerousActionRequest(), "user.plugin_token_revoke", user_id)
     try:
         SERVICE.auth.revoke_plugin_token(user_id)
-        SERVICE.db.record_audit(actor, "user.plugin_token_revoked", user_id)
+        SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_revoked", user_id)
         return {"status": "revoked"}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -761,9 +981,9 @@ def list_apps() -> dict[str, Any]:
 
 
 @app.get("/api/v1/apps/browser-extension/download")
-def download_browser_extension(_actor: str = Depends(require_console)) -> StreamingResponse:
+def download_browser_extension(_actor: dict[str, Any] = Depends(require_permission("application:download"))) -> StreamingResponse:
     package, application = browser_extension_package()
-    SERVICE.db.record_audit(_actor, "application.downloaded", "browser-extension", {"version": application["version"]})
+    SERVICE.db.record_audit(actor_username(_actor), "application.downloaded", "browser-extension", {"version": application["version"]})
     return StreamingResponse(
         io.BytesIO(package),
         media_type="application/zip",

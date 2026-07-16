@@ -11,7 +11,7 @@ from typing import Any
 
 from .settings import SETTINGS
 from .storage import Database
-from .permissions import has_permission, permissions_for_role
+from .permissions import default_data_scope_for_role, has_permission, permissions_for_role
 
 
 def hash_password(password: str) -> str:
@@ -41,7 +41,7 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 class AuthService:
-    ROLES = {"admin", "analyst", "auditor"}
+    ROLES = {"user", "admin", "analyst", "auditor"}
 
     def __init__(self, database: Database):
         self.db = database
@@ -112,6 +112,10 @@ class AuthService:
             raise KeyError("用户不存在")
         self.db.set_user_password(user_id, hash_password(password))
 
+    def verify_user_password(self, user_id: str, password: str) -> bool:
+        user = self.db.get_user_by_id(user_id)
+        return bool(user and verify_password(password, str(user.get("password_hash") or "")))
+
     def issue_plugin_token(self, user_id: str) -> dict[str, str]:
         user = self.db.get_user_by_id(user_id)
         if not user:
@@ -138,9 +142,10 @@ class AuthService:
             "display_name": user["display_name"],
             "role": user["role"],
             "permissions": permissions_for_role(str(user["role"])),
-            "data_scope": str(user.get("data_scope") or ("all" if user["role"] in {"admin", "auditor"} else "self")),
+            "data_scope": str(user.get("data_scope") or default_data_scope_for_role(str(user["role"]))),
             "organization_id": str(user.get("organization_id") or ""),
             "department_id": str(user.get("department_id") or ""),
+            "security_team_id": str(user.get("security_team_id") or user.get("department_id") or ""),
         }
 
     @staticmethod
@@ -163,6 +168,7 @@ class AuthService:
                 "data_scope",
                 "organization_id",
                 "department_id",
+                "security_team_id",
             )
         }
 

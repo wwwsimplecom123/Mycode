@@ -887,14 +887,10 @@ def list_users() -> dict[str, Any]:
 
 @app.post("/api/v1/users", status_code=201)
 def create_user(request: CreateUserRequest, actor: dict[str, Any] = Depends(require_permission("user:create"))) -> dict[str, Any]:
-    require_dangerous_confirmation(actor, request, "user.create", request.username)
     try:
         user = SERVICE.auth.create_user(request.username, request.password, request.display_name, request.role)
-        plugin_token = SERVICE.auth.issue_plugin_token(str(user["id"])) if has_permission({"role": request.role}, "analysis:create") else {"token": "", "token_masked": ""}
         SERVICE.db.record_audit(actor_username(actor), "user.created", str(user["id"]), {"username": user["username"], "role": user["role"]})
-        if plugin_token["token"]:
-            SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_issued", str(user["id"]), {"username": user["username"]})
-        return {**user, "plugin_token": plugin_token["token"], "plugin_token_masked": plugin_token["token_masked"]}
+        return {**user, "plugin_token": "", "plugin_token_masked": ""}
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

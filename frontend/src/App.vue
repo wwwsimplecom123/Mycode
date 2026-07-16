@@ -769,18 +769,15 @@ async function clearProviderKey() {
 async function createUser() {
   actionMessage.value = "";
   issuedPluginToken.value = null;
-  const confirmation = dangerousPayload("创建用户并签发插件 Token");
-  if (!confirmation) return;
   try {
     const created = await api("/api/v1/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...userForm.value, ...confirmation }),
+      body: JSON.stringify(userForm.value),
     });
-    issuedPluginToken.value = created.plugin_token ? { username: created.username, token: created.plugin_token } : null;
     userForm.value = { username: "", display_name: "", password: "", role: "analyst" };
     users.value = await api("/api/v1/users").then((x) => x.items);
-    actionMessage.value = created.plugin_token ? "用户已创建，并已签发个人插件 Token。Token 仅显示一次。" : "用户已创建。该角色不需要插件 Token。";
+    actionMessage.value = "User created. Issue a plugin token from the account list when needed.";
   } catch (error) {
     actionMessage.value = `操作失败：${readError(error)}`;
   }

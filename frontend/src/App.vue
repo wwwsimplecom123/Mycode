@@ -773,15 +773,13 @@ async function loadMePluginToken() {
 async function rotateOwnPluginToken() {
   const confirmText = selfPluginToken.value.configured ? "重新生成后，旧 Token 会立即失效。是否继续？" : "生成后请复制保存，Token 只显示一次。是否继续？";
   if (!window.confirm(confirmText)) return;
-  const confirm_password = window.prompt("请输入当前密码") || "";
-  if (!confirm_password) return;
   actionMessage.value = "";
   issuedOwnPluginToken.value = null;
   try {
     const issued = await api("/api/me/plugin-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirm_password, confirm_reason: "用户生成自己的插件 Token", request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
+      body: JSON.stringify({ request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
     });
     issuedOwnPluginToken.value = issued.token;
     await loadMePluginToken();
@@ -793,15 +791,13 @@ async function rotateOwnPluginToken() {
 
 async function revokeOwnPluginToken() {
   if (!window.confirm("撤销后，当前插件将无法继续提交检测。是否继续？")) return;
-  const confirm_password = window.prompt("请输入当前密码") || "";
-  if (!confirm_password) return;
   actionMessage.value = "";
   issuedOwnPluginToken.value = null;
   try {
     await api("/api/me/plugin-token", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirm_password, confirm_reason: "用户撤销自己的插件 Token", request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
+      body: JSON.stringify({ request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
     });
     await loadMePluginToken();
     actionMessage.value = "插件 Token 已撤销。";
@@ -835,15 +831,12 @@ async function createUser() {
 
 async function rotatePluginToken(item) {
   if (!window.confirm(`确定轮换 ${item.username} 的插件 Token？旧 Token 将立即失效。`)) return;
-  const confirmation = dangerousPayload("签发或轮换插件 Token", { reason: "管理员签发或轮换插件 Token" });
-  if (!confirmation) return;
   actionMessage.value = "";
   issuedPluginToken.value = null;
   try {
     const issued = await api(`/api/v1/users/${item.id}/plugin-token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(confirmation),
     });
     issuedPluginToken.value = { username: item.username, token: issued.token };
     users.value = await api("/api/v1/users").then((x) => x.items);
@@ -855,15 +848,12 @@ async function rotatePluginToken(item) {
 
 async function revokePluginToken(item) {
   if (!window.confirm(`确定撤销 ${item.username} 的插件 Token？该用户插件将无法继续检测。`)) return;
-  const confirmation = dangerousPayload("撤销插件 Token", { reason: "管理员撤销插件 Token" });
-  if (!confirmation) return;
   actionMessage.value = "";
   issuedPluginToken.value = null;
   try {
     await api(`/api/v1/users/${item.id}/plugin-token`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(confirmation),
     });
     users.value = await api("/api/v1/users").then((x) => x.items);
     actionMessage.value = "插件 Token 已撤销。";

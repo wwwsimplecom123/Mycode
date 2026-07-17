@@ -541,13 +541,6 @@ def me_plugin_token(actor: dict[str, Any] = Depends(require_permission("me:plugi
 
 @app.post("/api/me/plugin-token")
 def rotate_me_plugin_token(request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
-    payload = request or DangerousActionRequest()
-    password = str(getattr(payload, "confirm_password", "") or "")
-    if not password:
-        raise HTTPException(status_code=400, detail="请输入当前密码")
-    if not SERVICE.auth.verify_user_password(str(actor.get("id") or ""), password):
-        SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_confirmation_failed", str(actor.get("id") or ""))
-        raise HTTPException(status_code=403, detail="当前密码不正确")
     try:
         issued = SERVICE.auth.issue_plugin_token(str(actor.get("id") or ""))
         SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_rotated", str(actor.get("id") or ""))
@@ -560,13 +553,6 @@ def rotate_me_plugin_token(request: DangerousActionRequest | None = None, actor:
 
 @app.delete("/api/me/plugin-token")
 def revoke_me_plugin_token(request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
-    payload = request or DangerousActionRequest()
-    password = str(getattr(payload, "confirm_password", "") or "")
-    if not password:
-        raise HTTPException(status_code=400, detail="请输入当前密码")
-    if not SERVICE.auth.verify_user_password(str(actor.get("id") or ""), password):
-        SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_confirmation_failed", str(actor.get("id") or ""))
-        raise HTTPException(status_code=403, detail="当前密码不正确")
     try:
         SERVICE.auth.revoke_plugin_token(str(actor.get("id") or ""))
         SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_revoked", str(actor.get("id") or ""))
@@ -962,7 +948,6 @@ def reset_user_password(user_id: str, request: ResetPasswordRequest, actor: dict
 
 @app.post("/api/v1/users/{user_id}/plugin-token")
 def rotate_user_plugin_token(user_id: str, request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
-    require_dangerous_confirmation(actor, request or DangerousActionRequest(), "user.plugin_token_rotate", user_id)
     try:
         issued = SERVICE.auth.issue_plugin_token(user_id)
         SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_rotated", user_id)
@@ -975,7 +960,6 @@ def rotate_user_plugin_token(user_id: str, request: DangerousActionRequest | Non
 
 @app.delete("/api/v1/users/{user_id}/plugin-token")
 def revoke_user_plugin_token(user_id: str, request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
-    require_dangerous_confirmation(actor, request or DangerousActionRequest(), "user.plugin_token_revoke", user_id)
     try:
         SERVICE.auth.revoke_plugin_token(user_id)
         SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_revoked", user_id)

@@ -22,6 +22,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "analyst": frozenset({
         "analysis:create", "analysis:read:self", "analysis:read:team", "analysis:retry",
         "analysis:feedback", "analysis:review",
+        "me:plugin_token",
         "knowledge:read:published", "knowledge:draft:create", "knowledge:draft:update:self", "knowledge:submit",
         "policy:read", "provider:read", "audit:read:self", "system:read:summary",
         "application:download",
@@ -40,7 +41,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "user:read", "user:create", "user:update", "user:reset_password", "user:plugin_token",
         "audit:read:self", "audit:read:any", "audit:export",
         "system:read:summary", "system:read:full",
-        "application:download", "application:manage", "dangerous:confirm",
+        "application:download", "application:manage", "me:plugin_token", "dangerous:confirm",
     }),
 }
 

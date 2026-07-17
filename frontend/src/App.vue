@@ -43,9 +43,10 @@ const loginForm = ref({ username: "admin", password: "" });
 const loginError = ref("");
 const loginBusy = ref(false);
 const authReady = ref(false);
-const serviceWarning = ref("");
 const actionMessage = ref("");
 const issuedPluginToken = ref(null);
+const selfPluginToken = ref({ configured: false, token_prefix: "", last_used_at: "" });
+const issuedOwnPluginToken = ref(null);
 const userForm = ref({ username: "", display_name: "", password: "", role: "analyst" });
 const headers = computed(() => (token.value ? { Authorization: `Bearer ${token.value}` } : {}));
 let refreshTimer = null;
@@ -81,13 +82,6 @@ const userStats = computed(() => ({
   active: users.value.filter((item) => !item.disabled).length,
   admins: users.value.filter((item) => item.role === "admin" && !item.disabled).length,
 }));
-const viewScopeLabel = computed(() => {
-  const scope = user.value?.data_scope || "self";
-  if (scope === "all") return "全局管理视图";
-  if (scope === "all_readonly") return "全局只读审计视图";
-  if (scope === "team") return "安全组视图";
-  return "个人视图";
-});
 const navItems = computed(() => {
   const allItems = [
     { id: "dashboard", label: user.value?.role === "auditor" ? "审计首页" : "我的首页", icon: "⌂", permission: "analysis:read" },
@@ -145,10 +139,10 @@ function can(permission) {
   return false;
 }
 
-function dangerousPayload(action) {
+function dangerousPayload(action, options = {}) {
   const confirm_password = window.prompt(`${action}\n请输入当前密码进行二次确认`) || "";
   if (!confirm_password) return null;
-  const confirm_reason = window.prompt("请输入本次高危操作原因") || "";
+  const confirm_reason = options.reason || window.prompt("请输入本次高危操作原因") || "";
   if (!confirm_reason.trim()) return null;
   return { confirm_password, confirm_reason, request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` };
 }
@@ -190,11 +184,12 @@ async function logout() {
 function clearSession() {
   token.value = "";
   user.value = null;
+  selfPluginToken.value = { configured: false, token_prefix: "", last_used_at: "" };
+  issuedOwnPluginToken.value = null;
   stopAutoRefresh();
 }
 
 async function refresh() {
-  serviceWarning.value = "";
   const results = await Promise.allSettled([
     api("/api/v1/dashboard"),
     api("/api/v1/analyses").then((x) => x.items),
@@ -208,14 +203,19 @@ async function refresh() {
   results.forEach((result, index) => {
     if (result.status === "fulfilled" && targets[index]) targets[index].value = result.value;
   });
-  const failed = results.filter((result) => result.status === "rejected").length;
-  if (failed) serviceWarning.value = `${failed} 个模块暂时无法加载，登录会话仍保持有效。`;
   if (can("user:read") || can("policy:read")) {
     try {
       if (can("user:read")) users.value = await api("/api/v1/users").then((x) => x.items);
       if (can("policy:read")) setPolicyForm(await api("/api/v1/settings/detection-policy"));
     } catch {
-      serviceWarning.value = "管理员设置模块暂时无法加载，登录会话仍保持有效。";
+      // 部分管理数据不可用时静默降级，避免页面出现无意义告警。
+    }
+  }
+  if (can("me:plugin_token")) {
+    try {
+      await loadMePluginToken();
+    } catch {
+      selfPluginToken.value = { configured: false, token_prefix: "", last_used_at: "" };
     }
   }
   await nextTick();
@@ -766,6 +766,56 @@ async function clearProviderKey() {
   }
 }
 
+async function loadMePluginToken() {
+  selfPluginToken.value = await api("/api/me/plugin-token");
+}
+
+async function rotateOwnPluginToken() {
+  const confirmText = selfPluginToken.value.configured ? "重新生成后，旧 Token 会立即失效。是否继续？" : "生成后请复制保存，Token 只显示一次。是否继续？";
+  if (!window.confirm(confirmText)) return;
+  const confirm_password = window.prompt("请输入当前密码") || "";
+  if (!confirm_password) return;
+  actionMessage.value = "";
+  issuedOwnPluginToken.value = null;
+  try {
+    const issued = await api("/api/me/plugin-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm_password, confirm_reason: "用户生成自己的插件 Token", request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
+    });
+    issuedOwnPluginToken.value = issued.token;
+    await loadMePluginToken();
+    actionMessage.value = "插件 Token 已生成，请立即复制保存。";
+  } catch (error) {
+    actionMessage.value = `操作失败：${readError(error)}`;
+  }
+}
+
+async function revokeOwnPluginToken() {
+  if (!window.confirm("撤销后，当前插件将无法继续提交检测。是否继续？")) return;
+  const confirm_password = window.prompt("请输入当前密码") || "";
+  if (!confirm_password) return;
+  actionMessage.value = "";
+  issuedOwnPluginToken.value = null;
+  try {
+    await api("/api/me/plugin-token", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm_password, confirm_reason: "用户撤销自己的插件 Token", request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` }),
+    });
+    await loadMePluginToken();
+    actionMessage.value = "插件 Token 已撤销。";
+  } catch (error) {
+    actionMessage.value = `操作失败：${readError(error)}`;
+  }
+}
+
+async function copyOwnPluginToken() {
+  if (!issuedOwnPluginToken.value) return;
+  await navigator.clipboard.writeText(issuedOwnPluginToken.value);
+  actionMessage.value = "插件 Token 已复制。";
+}
+
 async function createUser() {
   actionMessage.value = "";
   issuedPluginToken.value = null;
@@ -785,7 +835,7 @@ async function createUser() {
 
 async function rotatePluginToken(item) {
   if (!window.confirm(`确定轮换 ${item.username} 的插件 Token？旧 Token 将立即失效。`)) return;
-  const confirmation = dangerousPayload("签发或轮换插件 Token");
+  const confirmation = dangerousPayload("签发或轮换插件 Token", { reason: "管理员签发或轮换插件 Token" });
   if (!confirmation) return;
   actionMessage.value = "";
   issuedPluginToken.value = null;
@@ -805,7 +855,7 @@ async function rotatePluginToken(item) {
 
 async function revokePluginToken(item) {
   if (!window.confirm(`确定撤销 ${item.username} 的插件 Token？该用户插件将无法继续检测。`)) return;
-  const confirmation = dangerousPayload("撤销插件 Token");
+  const confirmation = dangerousPayload("撤销插件 Token", { reason: "管理员撤销插件 Token" });
   if (!confirmation) return;
   actionMessage.value = "";
   issuedPluginToken.value = null;
@@ -996,11 +1046,9 @@ onBeforeUnmount(() => {
       <header class="console-header">
         <div class="header-title"><small>ShieldDome / 运营控制台</small><b>{{ {dashboard:'首页概览',upload:'EML 检测',events:'邮件事件',knowledge:'RAG 知识库',approvals:'审批中心',applications:'应用中心',policy:'策略管理',users:'用户管理',settings:'模型 API 设置',audit:'审计日志',system:'系统状态'}[view] || 'ShieldDome 控制台' }}</b></div>
         <form class="header-search" role="search" @submit.prevent="runConsoleSearch"><span>⌕</span><input v-model.trim="consoleQuery" type="search" placeholder="搜索邮件或知识"><button type="submit">搜索</button></form>
-        <div class="user-area"><span class="scope-chip">{{ viewScopeLabel }}</span><div class="user-avatar">{{ user.display_name?.slice(0,1) || 'U' }}</div><div class="user-name"><b>{{ user.display_name }}</b><small>{{ label(user.role) }}</small></div><button @click="logout">退出</button></div>
+        <div class="user-area"><div class="user-avatar">{{ user.display_name?.slice(0,1) || 'U' }}</div><div class="user-name"><b>{{ user.display_name }}</b><small>{{ label(user.role) }}</small></div><button @click="logout">退出</button></div>
       </header>
       <section class="content">
-        <p v-if="serviceWarning" class="service-warning">{{ serviceWarning }}</p>
-        <p v-if="user.data_scope !== 'all' && ['dashboard','events','internal','audit'].includes(view)" class="scope-note">当前视图已按你的数据权限过滤。</p>
         <template v-if="view==='dashboard'">
           <section class="page-intro dashboard-intro"><div><span class="eyebrow">Security Operations</span><h1>安全态势总览</h1><p>统一查看邮件检测、风险分布与待处理任务。</p></div><div class="intro-note"><b>{{ dashboard.total }}</b><span>累计检测邮件</span></div></section>
           <div class="stats">
@@ -1072,7 +1120,6 @@ onBeforeUnmount(() => {
                         <button type="button" @click.stop="approve(item)" :disabled="item.status==='published' || knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '发布' }}</button>
                         <button type="button" class="danger" @click.stop="disableKnowledge(item)" :disabled="item.status==='disabled' || knowledgeActionId===item.id || approvalBusy">{{ knowledgeActionId===item.id ? '处理中' : '停用' }}</button>
                       </template>
-                      <small v-else class="subtext">仅管理员审批</small>
                     </td>
                   </tr>
                   <tr v-if="!knowledge.length"><td colspan="6" class="empty-row">暂无知识。导入后会先进入待审核，发布后才会被深度检测检索。</td></tr>
@@ -1216,7 +1263,7 @@ onBeforeUnmount(() => {
                   <td><span :class="['status-pill', item.disabled ? 'off' : 'on']">{{ item.disabled ? '已停用' : '正常' }}</span></td>
                   <td><span :class="['status-pill', item.plugin_token_configured ? 'on' : 'off']">{{ item.plugin_token_configured ? item.plugin_token_prefix + '...' : '未签发' }}</span></td>
                   <td>{{ item.plugin_token_last_used_at?.slice(0,16).replace('T',' ') || '-' }}</td>
-                  <td class="actions"><button v-if="can('user:update')" @click="updateUserAccount(item)">保存</button><button v-if="can('user:reset_password')" @click="resetUserPassword(item)">重置密码</button><button v-if="can('user:plugin_token')" @click="rotatePluginToken(item)" :disabled="item.disabled">{{ item.plugin_token_configured ? '轮换 Token' : '签发 Token' }}</button><button v-if="can('user:plugin_token') && item.plugin_token_configured" class="danger" @click="revokePluginToken(item)">撤销 Token</button><button v-if="can('user:update')" :class="{danger:!item.disabled}" @click="updateUserAccount(item,!item.disabled)">{{ item.disabled ? '启用' : '停用' }}</button><small v-if="!can('user:update')" class="subtext">只读</small></td>
+                  <td class="actions"><button v-if="can('user:update')" @click="updateUserAccount(item)">保存</button><button v-if="can('user:reset_password')" @click="resetUserPassword(item)">重置密码</button><button v-if="can('user:plugin_token')" @click="rotatePluginToken(item)" :disabled="item.disabled">{{ item.plugin_token_configured ? '轮换 Token' : '签发 Token' }}</button><button v-if="can('user:plugin_token') && item.plugin_token_configured" class="danger" @click="revokePluginToken(item)">撤销 Token</button><button v-if="can('user:update')" :class="{danger:!item.disabled}" @click="updateUserAccount(item,!item.disabled)">{{ item.disabled ? '启用' : '停用' }}</button></td>
                 </tr></tbody>
               </table>
             </article>
@@ -1235,6 +1282,18 @@ onBeforeUnmount(() => {
           <article class="panel">
             <div class="title-row"><div><h2>应用中心</h2><p>从当前 ShieldDome 网站下载最新版客户端应用与浏览器插件。</p></div><span class="status-pill on">网站发行源正常</span></div>
             <p v-if="actionMessage" class="action-message">{{ actionMessage }}</p>
+            <section v-if="can('me:plugin_token')" class="plugin-token-card">
+              <div>
+                <h3>我的插件 Token</h3>
+                <p>浏览器插件连接 ShieldDome 时需要填写 Token。已生成的 Token 不会再次明文显示，如遗失请重新生成。</p>
+                <div class="app-meta"><span>{{ selfPluginToken.configured ? `当前 Token：${selfPluginToken.token_prefix}...` : '尚未生成 Token' }}</span><span>最近使用：{{ selfPluginToken.last_used_at?.slice(0,16).replace('T',' ') || '-' }}</span></div>
+              </div>
+              <div class="app-actions">
+                <button class="primary" @click="rotateOwnPluginToken">{{ selfPluginToken.configured ? '重新生成 Token' : '生成我的 Token' }}</button>
+                <button v-if="selfPluginToken.configured" @click="revokeOwnPluginToken">撤销 Token</button>
+              </div>
+              <div v-if="issuedOwnPluginToken" class="issued-token own-token"><b>新 Token 仅显示一次，请立即复制保存</b><code>{{ issuedOwnPluginToken }}</code><button @click="copyOwnPluginToken">复制 Token</button></div>
+            </section>
             <div class="app-cards">
               <section class="app-card" v-for="item in applications" :key="item.id">
                 <div class="app-icon">S</div><div class="app-info"><h3>{{ item.name }}</h3><p>{{ item.description }}</p><div class="app-meta"><span>版本 v{{ item.version }}</span><span>{{ item.platforms.join(' / ') }}</span><span>ZIP 安装包</span></div><code>SHA-256 {{ item.sha256 }}</code></div>

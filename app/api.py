@@ -539,6 +539,42 @@ def me_plugin_token(actor: dict[str, Any] = Depends(require_permission("me:plugi
     }
 
 
+@app.post("/api/me/plugin-token")
+def rotate_me_plugin_token(request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
+    payload = request or DangerousActionRequest()
+    password = str(getattr(payload, "confirm_password", "") or "")
+    if not password:
+        raise HTTPException(status_code=400, detail="请输入当前密码")
+    if not SERVICE.auth.verify_user_password(str(actor.get("id") or ""), password):
+        SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_confirmation_failed", str(actor.get("id") or ""))
+        raise HTTPException(status_code=403, detail="当前密码不正确")
+    try:
+        issued = SERVICE.auth.issue_plugin_token(str(actor.get("id") or ""))
+        SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_rotated", str(actor.get("id") or ""))
+        return issued
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/me/plugin-token")
+def revoke_me_plugin_token(request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
+    payload = request or DangerousActionRequest()
+    password = str(getattr(payload, "confirm_password", "") or "")
+    if not password:
+        raise HTTPException(status_code=400, detail="请输入当前密码")
+    if not SERVICE.auth.verify_user_password(str(actor.get("id") or ""), password):
+        SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_confirmation_failed", str(actor.get("id") or ""))
+        raise HTTPException(status_code=403, detail="当前密码不正确")
+    try:
+        SERVICE.auth.revoke_plugin_token(str(actor.get("id") or ""))
+        SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_revoked", str(actor.get("id") or ""))
+        return {"status": "revoked"}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.get("/api/me/audit-logs")
 def me_audit_logs(actor: dict[str, Any] = Depends(require_permission("audit:read:self"))) -> dict[str, Any]:
     return {"items": SERVICE.db.list_audit(200, actor_username(actor))}

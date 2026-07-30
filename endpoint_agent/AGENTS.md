@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试** 和 **Phase 1：Feature Pipeline 与数据集治理**。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**，以及开发期 **Phase 2：基线模型与评估**。
 
 现有生产包只包含：
 
@@ -30,7 +30,9 @@
 - 跨样本标签冲突拒绝、来源/时间 test 留出、版本化近重复分组和非敏感训练溯源；
 - `FeatureVector` 与 corpus manifest 的 `PrivacyScanner`。
 
-现有测试覆盖包导入、领域类型、不可变约束、Feature Pipeline 资源边界、corpus 准入/跨样本标签/去重/近重复/source-time split、manifest 溯源、隐私扫描、离线能力和仓库卫生。当前没有模型训练、模型推理、Detection Kernel、Native Messaging、数据库、加密存储或 UI；不得把 `README.md` 或 `DEVELOPMENT_PLAN.md` 描述的目标能力误认为已经实现。
+独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
+
+现有测试覆盖包导入、领域类型、不可变约束、Feature Pipeline 资源边界、corpus 准入/跨样本标签/去重/近重复/source-time split、manifest 溯源、训练数据 split 泄漏、校准选择/拒判、三态评估、ONNX、隐私、离线能力和仓库卫生。当前仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、Detection Kernel、Native Messaging、数据库、加密存储或 UI；不得把少量合成实验指标或 `README.md` 的目标能力误认为已经交付。
 
 ## 3. 目录边界
 
@@ -109,7 +111,7 @@ Endpoint Agent 生产代码必须：
 - 密钥、日志、SQLite 数据、诊断包、模型和训练数据必须保持忽略状态。
 - 禁止把真实 API Key、Token、密码、生产数据库、用户邮件或模型二进制写入源码、测试 fixture、计划或文档。
 
-Phase 0-1 没有实现持久化、加密或留存逻辑。后续实现必须以当前阶段的明确验收条件为准，不能用占位代码宣称安全能力存在。
+Phase 0-2 没有实现生产持久化、加密或留存逻辑。后续实现必须以当前阶段的明确验收条件为准，不能用占位代码宣称安全能力存在。
 
 ## 9. 常用验证命令
 
@@ -117,6 +119,12 @@ Phase 0-1 没有实现持久化、加密或留存逻辑。后续实现必须以�
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
+```
+
+Phase 2 训练测试必须使用隔离环境：
+
+```powershell
+.\endpoint_agent\.venv-training\Scripts\python.exe -m unittest discover -s endpoint_agent/training_tests -v
 ```
 
 离线验证构建配置：

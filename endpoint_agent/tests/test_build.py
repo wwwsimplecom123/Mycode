@@ -56,6 +56,13 @@ class WheelBuildTests(unittest.TestCase):
                     "shielddome_endpoint-0.1.0.dist-info/RECORD",
                 }
                 self.assertTrue(expected_names.issubset(archive_names))
+                self.assertFalse(
+                    any(
+                        name.startswith("shielddome_training/")
+                        or name.startswith("training/")
+                        for name in archive_names
+                    )
+                )
                 metadata = wheel_archive.read(
                     "shielddome_endpoint-0.1.0.dist-info/METADATA"
                 ).decode("utf-8")
@@ -63,3 +70,4 @@ class WheelBuildTests(unittest.TestCase):
             self.assertIn("Name: shielddome-endpoint", metadata)
             self.assertIn("Version: 0.1.0", metadata)
             self.assertIn("Requires-Python: >=3.12", metadata)
+            self.assertNotIn("Requires-Dist:", metadata)

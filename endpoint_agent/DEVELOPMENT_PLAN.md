@@ -415,7 +415,7 @@ Status: complete
 
 ### Phase 2：基线模型与评估
 
-Status: pending
+Status: complete
 
 - 训练结构化基线模型。
 - 实现概率校准和不确定拒判。
@@ -560,4 +560,4 @@ Status: pending
 
 ## 14. 下一步
 
-下一次开发从 **Phase 2：基线模型与评估** 开始。一次只完成一个阶段；阶段完成后运行相关测试、更新本文件的 Status，并检查 `git diff` 确保现有目录没有被修改。
+计划中的下一阶段是 **Phase 3：文本编码模型**，但开始前必须先获得真实、许可明确、人工审核且完成去重/泄漏隔离的 Approved Training Corpus。该数据前置条件未满足时，Phase 3 保持 `pending`，不得用 Phase 2 合成 fixture 选择正式文本编码模型。一次只完成一个阶段；阶段完成后运行相关测试、更新本文件的 Status，并检查 `git diff` 确保现有目录没有被修改。

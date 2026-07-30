@@ -79,3 +79,13 @@ class OfflineConstraintTests(unittest.TestCase):
         )
 
         self.assertEqual(violations, ())
+
+    def test_phase_two_training_source_contains_no_network_capability(self):
+        from _offline_guard import scan_offline_violations
+
+        violations = scan_offline_violations(
+            ENDPOINT_ROOT / "training",
+            ENDPOINT_ROOT / "pyproject.toml",
+        )
+
+        self.assertEqual(violations, ())

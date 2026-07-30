@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库实现到 **Phase 1：Feature Pipeline 与数据集治理**，提供：
+当前仓库实现到开发期 **Phase 2：基线模型与评估**，提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -11,9 +11,13 @@
 - 不可变的来源/时间 test 留出 `CorpusSplitPolicy`；
 - 只含 digest 和稳定标识的训练溯源 manifest；
 - `FeatureVector` 和 corpus manifest 的 `PrivacyScanner`；
-- 离线能力、隐私边界、数据产物忽略和 Wheel 构建测试。
+- 离线能力、隐私边界、数据产物忽略和 Wheel 构建测试；
+- 独立训练侧固定 140 维 Feature Assembler；
+- 合成数据 Logistic Regression、validation-only 校准候选质量门禁和不确定拒判；
+- test-only 分语言、来源和时间评估及 JSON/Markdown 报告；
+- 标准 ONNX 导出与 ONNX Runtime CPU 概率一致性验证。
 
-当前包只转换已经规范化的 `MailObservation`，不会读取邮箱、解析 `.eml`、训练或加载模型，也不会输出钓鱼概率或最终风险。它不是可交付的终端检测程序。
+生产包 `shielddome_endpoint` 仍只负责 Phase 0–1 契约和特征/Corpus 治理。Phase 2 能力只存在于开发期训练目录，不会进入生产 Wheel。当前不会读取邮箱、解析 `.eml`、加载生产模型或输出最终风险，也不是可交付的终端检测程序。
 
 ## 2. 环境要求
 
@@ -22,7 +26,7 @@
 - Git，可执行 `git check-ignore`；
 - 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-Phase 0-1 没有第三方运行时依赖，不需要下载模型、数据集或 NLTK 资源。
+生产 Wheel 没有第三方运行时依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。本阶段不下载模型、数据集或 NLTK 资源。
 
 ## 3. 目录概览
 
@@ -34,8 +38,10 @@ endpoint_agent/
   pyproject.toml                    Python 3.12 与 PEP 517 构建配置
   _build_backend.py                 零外部依赖的本地 Wheel 构建后端
   .gitignore                        敏感数据、corpus 和构建产物忽略规则
+  requirements-training.txt         固定的开发期训练依赖
   docs/
     USAGE.md                        本文档
+    TRAINING.md                     Phase 2 训练、许可证和 ONNX 验证
     plans/                          分阶段实施计划
   src/shielddome_endpoint/
     __init__.py                     包版本与公开导出
@@ -49,6 +55,9 @@ endpoint_agent/
     test_privacy.py                 隐私扫描
     test_offline_constraints.py     离线边界
     test_repository_hygiene.py      Git 忽略规则
+  training/shielddome_training/     Phase 2 独立训练侧深模块
+  training/run_synthetic_experiment.py  合成链路 CLI
+  training_tests/                   Phase 2 unittest
 ```
 
 ## 4. Feature Pipeline
@@ -214,7 +223,7 @@ manifest_result = scanner.scan_manifest(snapshot.manifest)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前应发现 49 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
+当前生产/Phase 0–1 回归应发现 51 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
 
 运行 Phase 1 单个测试模块：
 
@@ -223,6 +232,15 @@ python -m unittest discover -s endpoint_agent/tests -p "test_feature_pipeline.py
 python -m unittest discover -s endpoint_agent/tests -p "test_corpus_governance.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_privacy.py" -v
 ```
+
+运行 Phase 2 训练测试和完整合成实验：
+
+```powershell
+.\endpoint_agent\.venv-training\Scripts\python.exe -m unittest discover -s endpoint_agent/training_tests -v
+.\endpoint_agent\.venv-training\Scripts\python.exe endpoint_agent\training\run_synthetic_experiment.py --artifact-directory endpoint_agent\training\artifacts\acceptance
+```
+
+训练环境、数据边界、拒判感知指标语义、校准 candidate/selected 门禁、依赖许可证和 ONNX 验证见 `docs/TRAINING.md`。合成实验固定不可发布，不能作为 Phase 3 模型选型或发布指标。
 
 无需安装即可验证根包导入：
 
@@ -267,21 +285,24 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 
 ## 10. 尚未实现
 
-Phase 1 明确不包含：
+Phase 2 明确不包含：
 
-- 模型训练、Logistic Regression、TensorFlow、Keras 或 ONNX；
-- 概率校准、不确定拒判、模型加载或推理；
+- Approved Training Corpus、正式模型训练或生产模型；
+- Phase 3 文本编码器、微调、量化或最低硬件发布评测；
+- 生产 ONNX Runtime adapter、模型加载或端点推理；
 - Detection Kernel、风险融合或 DetectionOutcome 生成；
 - Native Messaging、浏览器插件或本地网络服务；
 - 数据库、DPAPI、AES-GCM、15 天留存；
 - 托盘、控制台、`.eml` 或邮件客户端 adapter。
 
-下一阶段是 **Phase 2：基线模型与评估**。开始前必须重新核对 `DEVELOPMENT_PLAN.md` 状态和新任务授权，不得从本使用文档推断后续能力已经存在。
+计划中的下一阶段是 **Phase 3：文本编码模型**，但当前受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞。在该前置条件落实前不能开始正式模型选择，也不能产生可发布 Unified Model Release；不得从本使用文档或合成指标推断 Phase 3 能力已经存在。
 
 ## 11. 修改后的最低验证
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
+.\endpoint_agent\.venv-training\Scripts\python.exe -m unittest discover -s endpoint_agent/training_tests -v
+.\endpoint_agent\.venv-training\Scripts\python.exe endpoint_agent\training\run_synthetic_experiment.py --artifact-directory endpoint_agent\training\artifacts\acceptance
 python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
 git status --short
 git diff --stat

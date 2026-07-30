@@ -45,5 +45,6 @@ __pycache__/
 /dist/
 *.egg-info/
 /.venv/
+/.venv-training/
 /.mypy_cache/
 /.ruff_cache/

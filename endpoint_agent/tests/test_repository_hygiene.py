@@ -35,6 +35,15 @@ class RepositoryHygieneTests(unittest.TestCase):
             with self.subTest(path=relative_path):
                 self.assert_endpoint_path_is_ignored(relative_path)
 
+    def test_training_environment_and_phase_two_artifacts_are_ignored(self):
+        for relative_path in (
+            "endpoint_agent/.venv-training/Scripts/python.exe",
+            "endpoint_agent/training/artifacts/acceptance/baseline.onnx",
+            "endpoint_agent/training/artifacts/acceptance/evaluation.json",
+        ):
+            with self.subTest(path=relative_path):
+                self.assert_endpoint_path_is_ignored(relative_path)
+
     def test_local_keys_are_ignored(self):
         self.assert_endpoint_path_is_ignored(
             "endpoint_agent/local/keys/evidence.key"

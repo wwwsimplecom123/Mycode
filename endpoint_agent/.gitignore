@@ -1,0 +1,47 @@
+# Unified Model Release artifacts
+/models/*
+!/models/README.md
+/model_packages/
+*.onnx
+*.ort
+
+# Approved Training Corpus and training outputs
+/training/data/
+/training/artifacts/
+/training_data/
+/datasets/
+
+# Per-user protected keys
+/local/keys/
+*.key
+*.pem
+
+# Local logs
+/local/logs/
+*.log
+
+# Per-user SQLite data and journal files
+/local/data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Explicitly exported diagnostic packages
+/diagnostics/
+*.diag.zip
+
+# Python caches and local build outputs
+/.cache/
+__pycache__/
+*.py[cod]
+/.coverage
+/htmlcov/
+/build/
+/dist/
+*.egg-info/
+/.venv/
+/.mypy_cache/
+/.ruff_cache/

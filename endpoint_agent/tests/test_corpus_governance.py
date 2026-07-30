@@ -10,6 +10,7 @@ ENDPOINT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ENDPOINT_ROOT / "src"))
 
 from shielddome_endpoint.corpus import (
+    AuthorizationStatus,
     CORPUS_SCHEMA_VERSION,
     CORPUS_MAX_CANDIDATES,
     CorpusCandidate,
@@ -18,6 +19,7 @@ from shielddome_endpoint.corpus import (
     CorpusRejection,
     CorpusSplitPolicy,
     DatasetSplit,
+    PrivacyReviewStatus,
     ReviewStatus,
     SourceLabel,
 )
@@ -25,24 +27,57 @@ from shielddome_endpoint.domain import FEATURE_SCHEMA_VERSION
 
 
 def make_candidate(item_id: str = "item-001", **changes) -> CorpusCandidate:
-    candidate = CorpusCandidate(
+    ingested_at = changes.get(
+        "ingested_at",
+        datetime(2026, 7, 30, tzinfo=timezone.utc),
+    )
+    timeline_anchor = (
+        ingested_at
+        if isinstance(ingested_at, datetime)
+        else datetime(2026, 7, 30, tzinfo=timezone.utc)
+    )
+    values = dict(
         item_id=item_id,
         final_label=CorpusLabel.PHISHING,
         original_label=SourceLabel.PHISHING,
         label_source="human-review",
+        label_guideline_version="label-guide-v1",
+        label_evidence_id=f"label-evidence-{item_id}",
+        reviewer_id="reviewer-fictional-001",
+        reviewed_at=timeline_anchor - timedelta(days=1),
         review_status=ReviewStatus.APPROVED,
+        review_policy_version="review-policy-v1",
         license_source="company-authorized-synthetic",
+        source_dataset_id="dataset-fictional-001",
+        source_version="dataset-version-v1",
+        source_evidence_digest=synthetic_digest("source-evidence-fictional-001"),
+        authorization_basis_id="authorization-fictional-001",
+        authorization_status=AuthorizationStatus.ACTIVE,
+        internal_training_allowed=True,
+        endpoint_weight_distribution_allowed=True,
+        authorization_approved_at=timeline_anchor - timedelta(days=2),
+        authorization_expires_at=timeline_anchor + timedelta(days=365),
+        authorization_no_expiry=False,
+        privacy_review_status=PrivacyReviewStatus.APPROVED,
+        sanitization_policy_version="sanitization-policy-v1",
+        privacy_reviewed_at=timeline_anchor - timedelta(hours=12),
+        privacy_evidence_digest=synthetic_digest("privacy-evidence-fictional-001"),
         raw_hash=synthetic_digest(f"raw:{item_id}"),
         normalized_hash=synthetic_digest(f"normalized:{item_id}"),
         template_group=f"template-{item_id}",
         campaign_group=f"campaign-{item_id}",
         language_group="mixed",
         source_group="synthetic",
-        ingested_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        ingested_at=ingested_at,
         feature_schema_version=FEATURE_SCHEMA_VERSION,
         sanitized_training_representation=f"synthetic representation {item_id}",
     )
-    return replace(candidate, **changes)
+    values.update(changes)
+    if "sanitized_representation_digest" not in changes:
+        values["sanitized_representation_digest"] = synthetic_digest(
+            values["sanitized_training_representation"]
+        )
+    return CorpusCandidate(**values)
 
 
 def synthetic_digest(value: str) -> str:
@@ -50,6 +85,312 @@ def synthetic_digest(value: str) -> str:
 
 
 class CorpusGovernanceTests(unittest.TestCase):
+    def test_prepare_requires_approved_privacy_review_and_sanitization_evidence(self):
+        candidates = (
+            make_candidate(
+                "invalid-privacy-digest",
+                privacy_evidence_digest="privacy-evidence",
+            ),
+            make_candidate(
+                "invalid-privacy-review-time",
+                privacy_reviewed_at=datetime(2026, 7, 29),
+            ),
+            make_candidate(
+                "invalid-sanitization-policy",
+                sanitization_policy_version="https://example.test/policy",
+            ),
+            make_candidate(
+                "invalid-sanitized-digest",
+                sanitized_representation_digest="B" * 64,
+            ),
+            make_candidate(
+                "mismatched-sanitized-digest",
+                sanitized_representation_digest=synthetic_digest("different-value"),
+            ),
+            make_candidate(
+                "missing-privacy-review-time",
+                privacy_reviewed_at=None,
+            ),
+            make_candidate(
+                "missing-sanitization-policy",
+                sanitization_policy_version="",
+            ),
+            make_candidate(
+                "missing-sanitized-representation",
+                sanitized_training_representation=None,
+                sanitized_representation_digest=synthetic_digest(
+                    "unused-fictional-representation"
+                ),
+            ),
+            make_candidate(
+                "privacy-review-future",
+                privacy_reviewed_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+            ),
+            make_candidate(
+                "privacy-review-pending",
+                privacy_review_status=PrivacyReviewStatus.PENDING,
+            ),
+        )
+
+        snapshot = CorpusGovernance().prepare(candidates)
+
+        self.assertEqual(snapshot.approved_items, ())
+        self.assertEqual(
+            tuple((item.item_id, item.reason) for item in snapshot.rejections),
+            (
+                ("invalid-privacy-digest", "invalid_privacy_evidence_digest"),
+                ("invalid-privacy-review-time", "invalid_privacy_review_time"),
+                (
+                    "invalid-sanitization-policy",
+                    "invalid_sanitization_policy_version",
+                ),
+                (
+                    "invalid-sanitized-digest",
+                    "invalid_sanitized_representation_digest",
+                ),
+                (
+                    "mismatched-sanitized-digest",
+                    "sanitized_representation_digest_mismatch",
+                ),
+                ("missing-privacy-review-time", "invalid_privacy_review_time"),
+                (
+                    "missing-sanitization-policy",
+                    "missing_sanitization_policy_version",
+                ),
+                ("missing-sanitized-representation", "missing_metadata"),
+                ("privacy-review-future", "invalid_privacy_review_time"),
+                ("privacy-review-pending", "privacy_not_approved"),
+            ),
+        )
+
+    def test_prepare_rejects_invalid_or_expired_authorization_times(self):
+        candidates = (
+            make_candidate(
+                "authorization-expired",
+                authorization_expires_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+            ),
+            make_candidate(
+                "authorization-expired-before",
+                authorization_expires_at=datetime(2026, 7, 29, tzinfo=timezone.utc),
+            ),
+            make_candidate(
+                "authorization-future-approval",
+                authorization_approved_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+            ),
+            make_candidate(
+                "authorization-naive-approval",
+                authorization_approved_at=datetime(2026, 7, 28),
+            ),
+            make_candidate(
+                "authorization-naive-expiry",
+                authorization_expires_at=datetime(2027, 7, 30),
+            ),
+            make_candidate(
+                "authorization-no-expiry-conflict",
+                authorization_no_expiry=True,
+            ),
+            make_candidate(
+                "authorization-no-expiry-unspecified",
+                authorization_no_expiry=None,
+            ),
+            make_candidate(
+                "authorization-missing-approval",
+                authorization_approved_at=None,
+            ),
+            make_candidate(
+                "authorization-missing-expiry",
+                authorization_expires_at=None,
+            ),
+        )
+
+        snapshot = CorpusGovernance().prepare(candidates)
+
+        self.assertEqual(snapshot.approved_items, ())
+        self.assertEqual(
+            tuple((item.item_id, item.reason) for item in snapshot.rejections),
+            (
+                ("authorization-expired", "authorization_expired"),
+                ("authorization-expired-before", "authorization_expired"),
+                (
+                    "authorization-future-approval",
+                    "invalid_authorization_approval_time",
+                ),
+                (
+                    "authorization-missing-approval",
+                    "invalid_authorization_approval_time",
+                ),
+                ("authorization-missing-expiry", "missing_authorization_expiry"),
+                (
+                    "authorization-naive-approval",
+                    "invalid_authorization_approval_time",
+                ),
+                (
+                    "authorization-naive-expiry",
+                    "invalid_authorization_expiry",
+                ),
+                (
+                    "authorization-no-expiry-conflict",
+                    "conflicting_authorization_expiry",
+                ),
+                (
+                    "authorization-no-expiry-unspecified",
+                    "conflicting_authorization_expiry",
+                ),
+            ),
+        )
+
+    def test_prepare_admits_explicit_perpetual_authorization(self):
+        candidate = make_candidate(
+            "authorization-perpetual",
+            authorization_expires_at=None,
+            authorization_no_expiry=True,
+        )
+
+        snapshot = CorpusGovernance().prepare((candidate,))
+
+        self.assertEqual(
+            tuple(item.candidate.item_id for item in snapshot.approved_items),
+            ("authorization-perpetual",),
+        )
+
+    def test_prepare_requires_safe_source_and_authorization_evidence(self):
+        candidates = (
+            make_candidate(
+                "authorization-inactive",
+                authorization_status=AuthorizationStatus.PENDING,
+            ),
+            make_candidate(
+                "invalid-authorization-basis",
+                authorization_basis_id="authorization=fictional-secret",
+            ),
+            make_candidate(
+                "invalid-source-dataset",
+                source_dataset_id="https://example.test/dataset",
+            ),
+            make_candidate(
+                "invalid-source-digest",
+                source_evidence_digest="A" * 64,
+            ),
+            make_candidate("invalid-source-version", source_version="bad\nversion"),
+            make_candidate("missing-authorization-basis", authorization_basis_id=""),
+            make_candidate("missing-source-dataset", source_dataset_id=""),
+            make_candidate("missing-source-version", source_version=""),
+        )
+
+        snapshot = CorpusGovernance().prepare(candidates)
+
+        self.assertEqual(snapshot.approved_items, ())
+        self.assertEqual(
+            tuple((item.item_id, item.reason) for item in snapshot.rejections),
+            (
+                ("authorization-inactive", "authorization_not_active"),
+                ("invalid-authorization-basis", "invalid_authorization_basis_id"),
+                ("invalid-source-dataset", "invalid_source_dataset_id"),
+                ("invalid-source-digest", "invalid_source_evidence_digest"),
+                ("invalid-source-version", "invalid_source_version"),
+                ("missing-authorization-basis", "missing_authorization_basis_id"),
+                ("missing-source-dataset", "missing_source_dataset_id"),
+                ("missing-source-version", "missing_source_version"),
+            ),
+        )
+
+    def test_prepare_requires_separate_explicit_training_and_distribution_rights(self):
+        active = make_candidate("active-authorization")
+        approved = make_candidate(
+            "approved-authorization",
+            authorization_status=AuthorizationStatus.APPROVED,
+        )
+        distribution_denied = make_candidate(
+            "distribution-denied",
+            endpoint_weight_distribution_allowed=False,
+        )
+        distribution_unspecified = make_candidate(
+            "distribution-unspecified",
+            endpoint_weight_distribution_allowed=None,
+        )
+        training_denied = make_candidate(
+            "training-denied",
+            internal_training_allowed=False,
+        )
+        training_unspecified = make_candidate(
+            "training-unspecified",
+            internal_training_allowed=None,
+        )
+
+        snapshot = CorpusGovernance().prepare(
+            (
+                distribution_unspecified,
+                training_denied,
+                active,
+                distribution_denied,
+                approved,
+                training_unspecified,
+            )
+        )
+
+        self.assertEqual(
+            tuple(item.candidate.item_id for item in snapshot.approved_items),
+            ("active-authorization", "approved-authorization"),
+        )
+        self.assertEqual(
+            tuple((item.item_id, item.reason) for item in snapshot.rejections),
+            (
+                ("distribution-denied", "endpoint_weight_distribution_not_allowed"),
+                (
+                    "distribution-unspecified",
+                    "endpoint_weight_distribution_not_allowed",
+                ),
+                ("training-denied", "internal_training_not_allowed"),
+                ("training-unspecified", "internal_training_not_allowed"),
+            ),
+        )
+
+    def test_prepare_requires_safe_complete_human_review_governance(self):
+        candidates = (
+            make_candidate(
+                "credential-like-label-evidence",
+                label_evidence_id="token:fictional-value",
+            ),
+            make_candidate(
+                "invalid-label-guideline",
+                label_guideline_version="C:\\Fictional\\guide.txt",
+            ),
+            make_candidate("invalid-label-evidence", label_evidence_id="bad\nvalue"),
+            make_candidate("invalid-review-policy", review_policy_version="x" * 129),
+            make_candidate("invalid-reviewed-at", reviewed_at=datetime(2026, 7, 29)),
+            make_candidate("invalid-reviewer", reviewer_id="https://example.test/reviewer"),
+            make_candidate("missing-label-evidence", label_evidence_id=""),
+            make_candidate("missing-label-guideline", label_guideline_version=""),
+            make_candidate("missing-review-policy", review_policy_version=""),
+            make_candidate("missing-reviewed-at", reviewed_at=None),
+            make_candidate("missing-reviewer", reviewer_id=""),
+            make_candidate(
+                "reviewed-after-admission",
+                reviewed_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+            ),
+        )
+
+        snapshot = CorpusGovernance().prepare(candidates)
+
+        self.assertEqual(snapshot.approved_items, ())
+        self.assertEqual(
+            tuple((item.item_id, item.reason) for item in snapshot.rejections),
+            (
+                ("credential-like-label-evidence", "invalid_label_evidence_id"),
+                ("invalid-label-evidence", "invalid_label_evidence_id"),
+                ("invalid-label-guideline", "invalid_label_guideline_version"),
+                ("invalid-review-policy", "invalid_review_policy_version"),
+                ("invalid-reviewed-at", "invalid_review_time"),
+                ("invalid-reviewer", "invalid_reviewer_id"),
+                ("missing-label-evidence", "missing_label_evidence_id"),
+                ("missing-label-guideline", "missing_label_guideline_version"),
+                ("missing-review-policy", "missing_review_policy_version"),
+                ("missing-reviewed-at", "invalid_review_time"),
+                ("missing-reviewer", "missing_reviewer_id"),
+                ("reviewed-after-admission", "invalid_review_time"),
+            ),
+        )
+
     def test_conservative_near_duplicates_share_group_and_split(self):
         first_representation = (
             "Invoice notice reference 202607300001 is ready at "
@@ -192,8 +533,8 @@ class CorpusGovernanceTests(unittest.TestCase):
         entry = first.entries[0]
 
         self.assertEqual(first, second)
-        self.assertEqual(CORPUS_SCHEMA_VERSION, "2.0")
-        self.assertEqual(first.schema_version, "2.0")
+        self.assertEqual(CORPUS_SCHEMA_VERSION, "3.0")
+        self.assertEqual(first.schema_version, "3.0")
         self.assertEqual(
             tuple(field.name for field in fields(type(entry))),
             (
@@ -201,8 +542,27 @@ class CorpusGovernanceTests(unittest.TestCase):
                 "original_label",
                 "final_label",
                 "label_source",
+                "label_guideline_version",
+                "label_evidence_id",
+                "reviewer_id",
+                "reviewed_at_utc",
                 "review_status",
+                "review_policy_version",
                 "license_identifier",
+                "source_dataset_id",
+                "source_version",
+                "source_evidence_digest",
+                "authorization_basis_id",
+                "authorization_status",
+                "internal_training_allowed",
+                "endpoint_weight_distribution_allowed",
+                "authorization_approved_at_utc",
+                "authorization_expires_at_utc",
+                "authorization_no_expiry",
+                "privacy_review_status",
+                "sanitization_policy_version",
+                "privacy_reviewed_at_utc",
+                "privacy_evidence_digest",
                 "ingested_at_utc",
                 "raw_content_digest",
                 "normalized_content_digest",
@@ -221,8 +581,33 @@ class CorpusGovernanceTests(unittest.TestCase):
         self.assertEqual(entry.original_label, SourceLabel.PHISHING)
         self.assertEqual(entry.final_label, CorpusLabel.PHISHING)
         self.assertEqual(entry.label_source, "human-review")
+        self.assertEqual(entry.label_guideline_version, "label-guide-v1")
+        self.assertEqual(entry.label_evidence_id, "label-evidence-manifest-provenance")
+        self.assertEqual(entry.reviewer_id, "reviewer-fictional-001")
+        self.assertEqual(entry.reviewed_at_utc, "2026-07-29T00:15:00+00:00")
         self.assertEqual(entry.review_status, ReviewStatus.APPROVED)
+        self.assertEqual(entry.review_policy_version, "review-policy-v1")
         self.assertEqual(entry.license_identifier, "company-authorized-synthetic")
+        self.assertEqual(entry.source_dataset_id, "dataset-fictional-001")
+        self.assertEqual(entry.source_version, "dataset-version-v1")
+        self.assertEqual(entry.source_evidence_digest, candidate.source_evidence_digest)
+        self.assertEqual(entry.authorization_basis_id, "authorization-fictional-001")
+        self.assertEqual(entry.authorization_status, AuthorizationStatus.ACTIVE)
+        self.assertIs(entry.internal_training_allowed, True)
+        self.assertIs(entry.endpoint_weight_distribution_allowed, True)
+        self.assertEqual(
+            entry.authorization_approved_at_utc,
+            "2026-07-28T00:15:00+00:00",
+        )
+        self.assertEqual(
+            entry.authorization_expires_at_utc,
+            "2027-07-30T00:15:00+00:00",
+        )
+        self.assertIs(entry.authorization_no_expiry, False)
+        self.assertEqual(entry.privacy_review_status, PrivacyReviewStatus.APPROVED)
+        self.assertEqual(entry.sanitization_policy_version, "sanitization-policy-v1")
+        self.assertEqual(entry.privacy_reviewed_at_utc, "2026-07-29T12:15:00+00:00")
+        self.assertEqual(entry.privacy_evidence_digest, candidate.privacy_evidence_digest)
         self.assertEqual(entry.ingested_at_utc, "2026-07-30T00:15:00+00:00")
         self.assertEqual(entry.raw_content_digest, candidate.raw_hash)
         self.assertEqual(entry.normalized_content_digest, candidate.normalized_hash)
@@ -233,6 +618,36 @@ class CorpusGovernanceTests(unittest.TestCase):
         self.assertEqual(entry.feature_schema_version, FEATURE_SCHEMA_VERSION)
         self.assertEqual(entry.corpus_schema_version, CORPUS_SCHEMA_VERSION)
         self.assertNotIn(representation, repr(first))
+        self.assertRegex(first.digest, r"^[0-9a-f]{64}$")
+
+    def test_manifest_digest_is_order_independent_and_covers_governance_facts(self):
+        first_candidate = make_candidate("manifest-digest-a")
+        second_candidate = make_candidate("manifest-digest-b")
+
+        forward = CorpusGovernance().prepare(
+            (first_candidate, second_candidate)
+        ).manifest
+        reverse = CorpusGovernance().prepare(
+            (second_candidate, first_candidate)
+        ).manifest
+        base = CorpusGovernance().prepare((first_candidate,)).manifest
+        valid_changes = (
+            {"label_guideline_version": "label-guide-v2"},
+            {"source_version": "dataset-version-v2"},
+            {"authorization_status": AuthorizationStatus.APPROVED},
+            {"authorization_basis_id": "authorization-fictional-002"},
+            {"privacy_evidence_digest": synthetic_digest("privacy-evidence-v2")},
+            {"sanitization_policy_version": "sanitization-policy-v2"},
+        )
+
+        self.assertEqual(forward, reverse)
+        self.assertEqual(forward.digest, reverse.digest)
+        for changes in valid_changes:
+            with self.subTest(changes=changes):
+                changed = CorpusGovernance().prepare(
+                    (replace(first_candidate, **changes),)
+                ).manifest
+                self.assertNotEqual(changed.digest, base.digest)
 
     def test_prepare_rejects_noncanonical_sha256_digests(self):
         invalid_raw_short = make_candidate(
@@ -277,6 +692,10 @@ class CorpusGovernanceTests(unittest.TestCase):
         )
 
     def test_prepare_rejects_unsafe_license_identifiers_and_naive_times(self):
+        credential_license = make_candidate(
+            "credential-license",
+            license_source="secret:fictional-value",
+        )
         private_path_license = make_candidate(
             "private-path-license",
             license_source="C:\\Users\\Fictional\\license.txt",
@@ -291,13 +710,14 @@ class CorpusGovernanceTests(unittest.TestCase):
         )
 
         snapshot = CorpusGovernance().prepare(
-            (private_path_license, network_license, naive_time)
+            (private_path_license, network_license, naive_time, credential_license)
         )
 
         self.assertEqual(snapshot.approved_items, ())
         self.assertEqual(
             tuple((item.item_id, item.reason) for item in snapshot.rejections),
             (
+                ("credential-license", "invalid_license_identifier"),
                 ("naive-time", "invalid_ingestion_time"),
                 ("network-license", "invalid_license_identifier"),
                 ("private-path-license", "invalid_license_identifier"),
@@ -305,6 +725,10 @@ class CorpusGovernanceTests(unittest.TestCase):
         )
 
     def test_prepare_rejects_unsafe_identifiers_projected_into_manifest(self):
+        unsafe_credential_source = make_candidate(
+            "unsafe-credential-source",
+            source_group="token:fictional-value",
+        )
         unsafe_source = make_candidate(
             "unsafe-source-identifier",
             source_group="C:\\Users\\Fictional\\corpus",
@@ -319,7 +743,12 @@ class CorpusGovernanceTests(unittest.TestCase):
         )
 
         snapshot = CorpusGovernance().prepare(
-            (unsafe_source, unsafe_label_source, unsafe_campaign)
+            (
+                unsafe_source,
+                unsafe_label_source,
+                unsafe_campaign,
+                unsafe_credential_source,
+            )
         )
 
         self.assertEqual(snapshot.approved_items, ())
@@ -327,6 +756,7 @@ class CorpusGovernanceTests(unittest.TestCase):
             tuple((item.item_id, item.reason) for item in snapshot.rejections),
             (
                 ("unsafe-campaign", "invalid_manifest_identifier"),
+                ("unsafe-credential-source", "invalid_manifest_identifier"),
                 ("unsafe-label-source", "invalid_manifest_identifier"),
                 ("unsafe-source-identifier", "invalid_manifest_identifier"),
             ),
@@ -387,6 +817,7 @@ class CorpusGovernanceTests(unittest.TestCase):
             CorpusSplitPolicy(
                 test_source_groups=("https://source.example.test/corpus",)
             ),
+            CorpusSplitPolicy(test_source_groups=("token:fictional-value",)),
             CorpusSplitPolicy(test_source_groups=("x" * 129,)),
             CorpusSplitPolicy(test_after=datetime(2026, 7, 1)),
         )

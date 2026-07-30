@@ -47,7 +47,7 @@ python -m venv endpoint_agent\.venv-training
 
 ## 数据边界
 
-`TrainingDataset` 只接受 `FEATURE_SCHEMA_VERSION = "2.0"` 和 `CORPUS_SCHEMA_VERSION = "2.0"`。同一 item、duplicate、near-duplicate、template 或 campaign 不得跨 train、validation、test。
+`TrainingDataset` 只接受 `FEATURE_SCHEMA_VERSION = "2.0"` 和 `CORPUS_SCHEMA_VERSION = "3.0"`。同一 item、duplicate、near-duplicate、template 或 campaign 不得跨 train、validation、test。`3.0` corpus manifest 要求完整的人工审核、来源证据、授权期限、隐私批准，以及分别显式允许内部训练和终端模型权重分发；manifest digest 覆盖这些事实。
 
 - train 只拟合带 `class_weight="balanced"` 和固定 seed 的 Logistic Regression；
 - validation 只拟合一维 sigmoid 校准候选、按 Brier Score 选择 identity 或 sigmoid，并选择 benign/phishing 阈值；
@@ -55,6 +55,8 @@ python -m venv endpoint_agent\.venv-training
 - 改变 test 标签不得改变模型、校准候选、校准选择、阈值或 ONNX SHA；
 - validation 每个标签少于两个样本时明确失败，不回退使用 test；
 - Phase 2 入口拒绝 `synthetic_only=false`，避免把当前链路误用于未治理真实数据。
+
+上述准入加固仍不代表 Approved Training Corpus 已存在。Phase 2 合成 fixture 没有真实语料授权证据，只能验证链路；不得因 schema 更新而用于 Phase 3 模型选择、训练或发布。
 
 Feature Assembler 使用固定 140 维布局：26 个 numeric、固定 one-hot categorical、64 个 Phase 1 text Hashing bucket 和 9 个 missing-mask 位。未知类别进入固定 `unknown` bucket，不拟合 vocabulary，不保存正文或 Token。
 

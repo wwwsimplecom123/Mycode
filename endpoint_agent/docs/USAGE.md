@@ -10,7 +10,7 @@
 - Approved Training Corpus 的 `CorpusGovernance.prepare`；
 - 不可变的来源/时间 test 留出 `CorpusSplitPolicy`；
 - 只含 digest 和稳定标识的训练溯源 manifest；
-- `FeatureVector` 和 corpus manifest 的 `PrivacyScanner`；
+- `CorpusCandidate`、`FeatureVector` 和 corpus manifest 的 `PrivacyScanner`；
 - 离线能力、隐私边界、数据产物忽略和 Wheel 构建测试；
 - 独立训练侧固定 140 维 Feature Assembler；
 - 合成数据 Logistic Regression、validation-only 校准候选质量门禁和不确定拒判；
@@ -48,7 +48,7 @@ endpoint_agent/
     domain.py                       核心领域类型
     feature_pipeline.py             确定性特征转换
     corpus.py                       Corpus Governance 深模块
-    privacy.py                      FeatureVector/manifest 隐私扫描
+    privacy.py                      candidate/FeatureVector/manifest 隐私扫描
   tests/
     test_feature_pipeline.py        Feature Pipeline 公开行为
     test_corpus_governance.py       corpus 准入、去重和 split
@@ -134,22 +134,44 @@ import hashlib
 
 from shielddome_endpoint import (
     FEATURE_SCHEMA_VERSION,
+    AuthorizationStatus,
     CorpusCandidate,
     CorpusGovernance,
     CorpusLabel,
     CorpusSplitPolicy,
+    PrivacyReviewStatus,
     ReviewStatus,
     SourceLabel,
 )
 
 
+representation = "sanitized synthetic representation"
 candidate = CorpusCandidate(
     item_id="synthetic-item-001",
     final_label=CorpusLabel.PHISHING,
     original_label=SourceLabel.PHISHING,
     label_source="human-review",
+    label_guideline_version="label-guide-v1",
+    label_evidence_id="label-evidence-synthetic-001",
+    reviewer_id="reviewer-fictional-001",
+    reviewed_at=datetime(2026, 7, 29, tzinfo=timezone.utc),
     review_status=ReviewStatus.APPROVED,
-    license_source="company-authorized-synthetic",
+    review_policy_version="review-policy-v1",
+    license_source="license-fictional-001",
+    source_dataset_id="dataset-fictional-001",
+    source_version="dataset-version-v1",
+    source_evidence_digest=hashlib.sha256(b"source-evidence-001").hexdigest(),
+    authorization_basis_id="authorization-fictional-001",
+    authorization_status=AuthorizationStatus.ACTIVE,
+    internal_training_allowed=True,
+    endpoint_weight_distribution_allowed=True,
+    authorization_approved_at=datetime(2026, 7, 28, tzinfo=timezone.utc),
+    authorization_expires_at=datetime(2027, 7, 30, tzinfo=timezone.utc),
+    authorization_no_expiry=False,
+    privacy_review_status=PrivacyReviewStatus.APPROVED,
+    sanitization_policy_version="sanitization-policy-v1",
+    privacy_reviewed_at=datetime(2026, 7, 29, 12, tzinfo=timezone.utc),
+    privacy_evidence_digest=hashlib.sha256(b"privacy-evidence-001").hexdigest(),
     raw_hash=hashlib.sha256(b"synthetic-raw-001").hexdigest(),
     normalized_hash=hashlib.sha256(b"synthetic-normalized-001").hexdigest(),
     template_group="synthetic-template-001",
@@ -158,7 +180,10 @@ candidate = CorpusCandidate(
     source_group="synthetic",
     ingested_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
     feature_schema_version=FEATURE_SCHEMA_VERSION,
-    sanitized_training_representation="sanitized synthetic representation",
+    sanitized_training_representation=representation,
+    sanitized_representation_digest=hashlib.sha256(
+        representation.encode("utf-8")
+    ).hexdigest(),
 )
 
 policy = CorpusSplitPolicy(
@@ -170,14 +195,18 @@ snapshot = CorpusGovernance().prepare((candidate,), split_policy=policy)
 
 `prepare` 隐藏并统一执行：
 
-- 来源、许可证、审核状态、必填元数据和 feature schema 准入；
+- 标签指南、非敏感标签证据、稳定审核人 ID、审核时间/政策和人工批准状态准入；
+- 来源数据集 ID/版本、来源证据 SHA-256、许可证标识和 feature schema 准入；
+- 授权依据、approved/active 状态、批准时间、到期或明确无期限状态准入；到期时间必须严格晚于确定性的 `ingested_at` 准入时点；
+- 内部训练权和终端模型权重分发权必须分别显式为 `True`；
+- 隐私批准、脱敏政策、隐私审核时间/证据和 sanitized representation SHA-256 准入；
 - benign/phishing 最终标签与 spam/ham/phishing/benign 原始语义检查；
 - spam/ham 非人工来源禁止自动升级；
 - 明确 phishing/benign 标签冲突拒绝；
 - 相同 raw 或 normalized SHA-256 的不同最终标签整组拒绝；
 - raw/normalized digest 必须是 64 位小写规范 SHA-256；
 - 许可证和所有进入 manifest 的 group/source 标识不得是路径、网络地址或数据内容；
-- ingestion time 必须带时区，manifest 统一序列化为 UTC；
+- ingestion、人工审核、授权批准/到期和隐私审核时间必须带时区，manifest 统一序列化为 UTC；
 - raw hash 精确去重，并按 item ID 稳定选择 canonical；
 - normalized hash 转换为不暴露原 hash 的稳定 duplicate group；
 - 仅基于前 4096 字符 sanitized representation 的保守 `near-v1` 指纹；
@@ -185,10 +214,18 @@ snapshot = CorpusGovernance().prepare((candidate,), split_policy=policy)
 - 指定 source group 或严格晚于 cutoff 的任一组员会使整个连通分量进入 test；
 - 使用 SHA-256 稳定分配 70% train、15% validation、15% test；
 - 单次最多接收 4096 个候选；超限批次整体以稳定错误码拒绝；
-- manifest 记录原始/最终标签、标签来源、审核、许可证标识、UTC 时间、raw/normalized/representation SHA-256、全部分组、schema 和 split；
+- manifest 记录稳定 ID、版本、状态、权利布尔结论、UTC 时间、raw/normalized/representation/evidence SHA-256、全部分组、schema 和 split；
+- manifest 的规范 SHA-256 `digest` 覆盖全部条目和新增治理事实；相同输入可复现，候选顺序不影响结果；
 - manifest 不保存 sanitized representation 正文、密码、Token、完整 URL query 或私有路径。
 
-当前 `CORPUS_SCHEMA_VERSION` 为 `2.0`。`CorpusSplitPolicy.test_after` 的语义是“严格晚于截止点”；等于截止点的样本继续使用默认确定性 split。默认 policy 不强制留出，保持原调用方式兼容。
+稳定拒绝码按类别包括：
+
+- 标签审核：`missing_label_guideline_version`、`invalid_label_guideline_version`、`missing_label_evidence_id`、`invalid_label_evidence_id`、`missing_reviewer_id`、`invalid_reviewer_id`、`invalid_review_time`、`missing_review_policy_version`、`invalid_review_policy_version`；
+- 来源和授权：`missing_source_dataset_id`、`invalid_source_dataset_id`、`missing_source_version`、`invalid_source_version`、`invalid_source_evidence_digest`、`missing_authorization_basis_id`、`invalid_authorization_basis_id`、`authorization_not_active`；
+- 权利和时间：`internal_training_not_allowed`、`endpoint_weight_distribution_not_allowed`、`invalid_authorization_approval_time`、`missing_authorization_expiry`、`conflicting_authorization_expiry`、`invalid_authorization_expiry`、`authorization_expired`；
+- 隐私：`privacy_not_approved`、`missing_sanitization_policy_version`、`invalid_sanitization_policy_version`、`invalid_privacy_review_time`、`invalid_privacy_evidence_digest`、`invalid_sanitized_representation_digest`、`sanitized_representation_digest_mismatch`。
+
+拒绝记录只包含 `item_id` 和一个稳定 code，不回显非法字段值。当前 `CORPUS_SCHEMA_VERSION` 为 `3.0`。`CorpusSplitPolicy.test_after` 的语义是“严格晚于截止点”；等于截止点的样本继续使用默认确定性 split。默认 policy 不强制留出，保持原调用方式兼容。
 
 `CorpusSnapshot` 只是内存领域结果。本阶段不提供文件导入、snapshot 持久化、数据加载器或训练入口。
 
@@ -199,6 +236,7 @@ from shielddome_endpoint import PrivacyScanner
 
 
 scanner = PrivacyScanner()
+candidate_result = scanner.scan_candidate(candidate)
 feature_result = scanner.scan_feature_vector(vector)
 manifest_result = scanner.scan_manifest(snapshot.manifest)
 ```
@@ -211,9 +249,10 @@ manifest_result = scanner.scan_manifest(snapshot.manifest)
 - 调用方给定的禁止值；
 - password、Token、API Key、Authorization 等赋值形态；
 - 带完整 query 的 URL；
-- 典型 Windows/Linux 用户私有路径。
+- 邮箱地址和换行；
+- Windows 绝对路径和典型 Linux 私有路径。
 
-隐私扫描是结构化输出的防回归门禁，不替代候选数据的人工脱敏和审核。
+所有 violation code 都排序并去重；结果不会包含命中原值、内容片段或身份信息。隐私扫描是结构化输出的防回归门禁，不替代候选数据的人工脱敏和审核，也不是邮件脱敏器。
 
 ## 7. 测试与包导入
 
@@ -223,7 +262,7 @@ manifest_result = scanner.scan_manifest(snapshot.manifest)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前生产/Phase 0–1 回归应发现 51 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
+当前完整 Endpoint Agent 回归应发现 58 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
 
 运行 Phase 1 单个测试模块：
 

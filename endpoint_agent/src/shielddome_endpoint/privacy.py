@@ -2,7 +2,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from enum import StrEnum
 import re
 
-from .corpus import CorpusManifest
+from .corpus import CorpusCandidate, CorpusManifest
 from .domain import FeatureVector
 
 
@@ -46,12 +46,33 @@ def _scan_strings(
             violations.add("credential_assignment")
         if re.search(r"\b[a-z][a-z0-9+.-]*://[^\s?]+\?[^\s]+", value):
             violations.add("url_query")
-        if re.search(r"(?i)(?:[a-z]:\\users\\|/home/|/users/)", value):
+        if re.search(
+            r"(?i)(?:[a-z]:\\|/home/|/users/|/private/|/var/lib/)",
+            value,
+        ):
             violations.add("private_path")
+        if re.search(
+            r"(?i)\b[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b",
+            value,
+        ):
+            violations.add("email_address")
+        if "\n" in value or "\r" in value:
+            violations.add("line_break")
     return tuple(sorted(violations))
 
 
 class PrivacyScanner:
+    def scan_candidate(
+        self,
+        candidate: CorpusCandidate,
+        forbidden_values: tuple[str, ...] = (),
+    ) -> PrivacyScanResult:
+        violations = _scan_strings(_string_values(candidate), forbidden_values)
+        return PrivacyScanResult(
+            safe=not violations,
+            violations=violations,
+        )
+
     def scan_feature_vector(
         self,
         vector: FeatureVector,

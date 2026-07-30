@@ -151,9 +151,14 @@ The target is approximately 500 MB, not the 2 GB maximum. The maximum exists as 
 - Human-confirmed phishing cases.
 - No unreviewed personal inbox email.
 - RAG or feedback records are candidates only; they require review before inclusion.
+- Every candidate must carry non-sensitive label-guideline, label-evidence, reviewer, source-dataset and source-evidence identifiers.
+- Authorization must be approved or active, unexpired at admission, and separately allow internal training and endpoint model-weight distribution.
+- Privacy review must be approved and bind a sanitization-policy version, privacy-evidence digest and sanitized-representation digest.
 - Deduplicate by raw hash, normalized hash and template/near-duplicate clustering.
 - Split by source, campaign/template and time to prevent leakage.
-- Keep immutable dataset and feature-schema versions for every model release.
+- Keep immutable dataset, corpus and feature-schema versions plus a deterministic manifest digest for every model release.
+
+`CorpusGovernance.prepare` is the only admission seam for these facts. Missing, unsafe or inconsistent governance metadata is rejected with a stable code; rejected values are never copied into the rejection record. This hardening does not create an Approved Training Corpus and does not start Phase 3 model work.
 
 ### Release Gates
 
@@ -269,4 +274,3 @@ Model binaries, training corpora, raw email, local databases, keys and exported 
 - Automatic email quarantine or deletion.
 - Attachment download, extraction, preview or execution.
 - Reading proprietary mail-client databases or intercepting mail traffic.
-

@@ -1,18 +1,22 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 import hashlib
+import json
 import re
 import unicodedata
 
 from .domain import FEATURE_SCHEMA_VERSION
 
 
-CORPUS_SCHEMA_VERSION = "2.0"
+CORPUS_SCHEMA_VERSION = "3.0"
 NEAR_DUPLICATE_FINGERPRINT_VERSION = "1.0"
 NEAR_DUPLICATE_MAX_CHARACTERS = 4096
 CORPUS_MAX_CANDIDATES = 4096
 SAFE_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+IDENTIFIER_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)\b(?:password|passwd|token|api[_-]?key|authorization|secret):"
+)
 HUMAN_LABEL_SOURCES = frozenset(
     {"human-review", "analyst-confirmed", "security-review"}
 )
@@ -36,6 +40,20 @@ class ReviewStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class AuthorizationStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
+class PrivacyReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class DatasetSplit(StrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
@@ -54,8 +72,27 @@ class CorpusCandidate:
     final_label: CorpusLabel
     original_label: SourceLabel
     label_source: str
+    label_guideline_version: str
+    label_evidence_id: str
+    reviewer_id: str
+    reviewed_at: datetime
     review_status: ReviewStatus
+    review_policy_version: str
     license_source: str
+    source_dataset_id: str
+    source_version: str
+    source_evidence_digest: str
+    authorization_basis_id: str
+    authorization_status: AuthorizationStatus
+    internal_training_allowed: bool
+    endpoint_weight_distribution_allowed: bool
+    authorization_approved_at: datetime
+    authorization_expires_at: datetime | None
+    authorization_no_expiry: bool
+    privacy_review_status: PrivacyReviewStatus
+    sanitization_policy_version: str
+    privacy_reviewed_at: datetime
+    privacy_evidence_digest: str
     raw_hash: str
     normalized_hash: str
     template_group: str
@@ -65,6 +102,7 @@ class CorpusCandidate:
     ingested_at: datetime
     feature_schema_version: str
     sanitized_training_representation: str
+    sanitized_representation_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,8 +125,27 @@ class CorpusManifestEntry:
     original_label: SourceLabel
     final_label: CorpusLabel
     label_source: str
+    label_guideline_version: str
+    label_evidence_id: str
+    reviewer_id: str
+    reviewed_at_utc: str
     review_status: ReviewStatus
+    review_policy_version: str
     license_identifier: str
+    source_dataset_id: str
+    source_version: str
+    source_evidence_digest: str
+    authorization_basis_id: str
+    authorization_status: AuthorizationStatus
+    internal_training_allowed: bool
+    endpoint_weight_distribution_allowed: bool
+    authorization_approved_at_utc: str
+    authorization_expires_at_utc: str | None
+    authorization_no_expiry: bool
+    privacy_review_status: PrivacyReviewStatus
+    sanitization_policy_version: str
+    privacy_reviewed_at_utc: str
+    privacy_evidence_digest: str
     ingested_at_utc: str
     raw_content_digest: str
     normalized_content_digest: str
@@ -108,6 +165,10 @@ class CorpusManifestEntry:
 class CorpusManifest:
     entries: tuple[CorpusManifestEntry, ...]
     schema_version: str = CORPUS_SCHEMA_VERSION
+    digest: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "digest", _manifest_digest(self))
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +181,7 @@ class CorpusSnapshot:
 
 def _validate_split_policy(split_policy: CorpusSplitPolicy) -> None:
     if any(
-        SAFE_IDENTIFIER_PATTERN.fullmatch(source_group) is None
+        not _is_safe_identifier(source_group)
         for source_group in split_policy.test_source_groups
     ):
         raise ValueError("invalid_split_policy")
@@ -131,20 +192,145 @@ def _validate_split_policy(split_policy: CorpusSplitPolicy) -> None:
         raise ValueError("invalid_split_policy")
 
 
+def _is_aware_datetime(value: object) -> bool:
+    return (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() is not None
+    )
+
+
+def _is_missing_identifier(value: object) -> bool:
+    return not isinstance(value, str) or not value.strip()
+
+
+def _is_safe_identifier(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and SAFE_IDENTIFIER_PATTERN.fullmatch(value) is not None
+        and IDENTIFIER_CREDENTIAL_PATTERN.search(value) is None
+    )
+
+
+def _is_canonical_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    )
+
+
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _manifest_digest(manifest: CorpusManifest) -> str:
+    canonical_payload = json.dumps(
+        {
+            "entries": [asdict(entry) for entry in manifest.entries],
+            "schema_version": manifest.schema_version,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical_payload).hexdigest()
+
+
 def _admission_rejection(candidate: CorpusCandidate) -> str | None:
-    if not candidate.label_source.strip() or not candidate.source_group.strip():
-        return "missing_source"
-    if not candidate.license_source.strip():
-        return "missing_license"
-    if SAFE_IDENTIFIER_PATTERN.fullmatch(candidate.license_source) is None:
-        return "invalid_license_identifier"
-    if (
-        candidate.ingested_at.tzinfo is None
-        or candidate.ingested_at.utcoffset() is None
+    if _is_missing_identifier(candidate.label_source) or _is_missing_identifier(
+        candidate.source_group
     ):
+        return "missing_source"
+    if _is_missing_identifier(candidate.license_source):
+        return "missing_license"
+    if not _is_safe_identifier(candidate.license_source):
+        return "invalid_license_identifier"
+    if not _is_aware_datetime(candidate.ingested_at):
         return "invalid_ingestion_time"
+    if _is_missing_identifier(candidate.label_guideline_version):
+        return "missing_label_guideline_version"
+    if not _is_safe_identifier(candidate.label_guideline_version):
+        return "invalid_label_guideline_version"
+    if _is_missing_identifier(candidate.label_evidence_id):
+        return "missing_label_evidence_id"
+    if not _is_safe_identifier(candidate.label_evidence_id):
+        return "invalid_label_evidence_id"
+    if _is_missing_identifier(candidate.reviewer_id):
+        return "missing_reviewer_id"
+    if not _is_safe_identifier(candidate.reviewer_id):
+        return "invalid_reviewer_id"
+    if not _is_aware_datetime(candidate.reviewed_at) or (
+        candidate.reviewed_at > candidate.ingested_at
+    ):
+        return "invalid_review_time"
+    if _is_missing_identifier(candidate.review_policy_version):
+        return "missing_review_policy_version"
+    if not _is_safe_identifier(candidate.review_policy_version):
+        return "invalid_review_policy_version"
     if candidate.review_status is not ReviewStatus.APPROVED:
         return "not_human_approved"
+    if _is_missing_identifier(candidate.source_dataset_id):
+        return "missing_source_dataset_id"
+    if not _is_safe_identifier(candidate.source_dataset_id):
+        return "invalid_source_dataset_id"
+    if _is_missing_identifier(candidate.source_version):
+        return "missing_source_version"
+    if not _is_safe_identifier(candidate.source_version):
+        return "invalid_source_version"
+    if not _is_canonical_sha256(candidate.source_evidence_digest):
+        return "invalid_source_evidence_digest"
+    if _is_missing_identifier(candidate.authorization_basis_id):
+        return "missing_authorization_basis_id"
+    if not _is_safe_identifier(candidate.authorization_basis_id):
+        return "invalid_authorization_basis_id"
+    if not (
+        candidate.authorization_status is AuthorizationStatus.APPROVED
+        or candidate.authorization_status is AuthorizationStatus.ACTIVE
+    ):
+        return "authorization_not_active"
+    if candidate.internal_training_allowed is not True:
+        return "internal_training_not_allowed"
+    if candidate.endpoint_weight_distribution_allowed is not True:
+        return "endpoint_weight_distribution_not_allowed"
+    if not _is_aware_datetime(candidate.authorization_approved_at) or (
+        candidate.authorization_approved_at > candidate.ingested_at
+    ):
+        return "invalid_authorization_approval_time"
+    if candidate.authorization_no_expiry is True:
+        if candidate.authorization_expires_at is not None:
+            return "conflicting_authorization_expiry"
+    elif candidate.authorization_no_expiry is False:
+        if candidate.authorization_expires_at is None:
+            return "missing_authorization_expiry"
+        if not _is_aware_datetime(candidate.authorization_expires_at):
+            return "invalid_authorization_expiry"
+        if candidate.authorization_expires_at <= candidate.ingested_at:
+            return "authorization_expired"
+    else:
+        return "conflicting_authorization_expiry"
+    if candidate.privacy_review_status is not PrivacyReviewStatus.APPROVED:
+        return "privacy_not_approved"
+    if _is_missing_identifier(candidate.sanitization_policy_version):
+        return "missing_sanitization_policy_version"
+    if not _is_safe_identifier(candidate.sanitization_policy_version):
+        return "invalid_sanitization_policy_version"
+    if not _is_aware_datetime(candidate.privacy_reviewed_at) or (
+        candidate.privacy_reviewed_at > candidate.ingested_at
+    ):
+        return "invalid_privacy_review_time"
+    if not _is_canonical_sha256(candidate.privacy_evidence_digest):
+        return "invalid_privacy_evidence_digest"
+    if not (
+        isinstance(candidate.sanitized_training_representation, str)
+        and candidate.sanitized_training_representation.strip()
+    ):
+        return "missing_metadata"
+    if not _is_canonical_sha256(candidate.sanitized_representation_digest):
+        return "invalid_sanitized_representation_digest"
+    if candidate.sanitized_representation_digest != hashlib.sha256(
+        candidate.sanitized_training_representation.encode("utf-8")
+    ).hexdigest():
+        return "sanitized_representation_digest_mismatch"
     if (
         candidate.original_label in {SourceLabel.SPAM, SourceLabel.HAM}
         and candidate.label_source.strip().casefold() not in HUMAN_LABEL_SOURCES
@@ -160,12 +346,12 @@ def _admission_rejection(candidate: CorpusCandidate) -> str | None:
         return "label_conflict"
     if candidate.feature_schema_version != FEATURE_SCHEMA_VERSION:
         return "feature_schema_mismatch"
-    if re.fullmatch(r"[0-9a-f]{64}", candidate.raw_hash) is None:
+    if not _is_canonical_sha256(candidate.raw_hash):
         return "invalid_raw_digest"
-    if re.fullmatch(r"[0-9a-f]{64}", candidate.normalized_hash) is None:
+    if not _is_canonical_sha256(candidate.normalized_hash):
         return "invalid_normalized_digest"
-    if not all(
-        value.strip()
+    if any(
+        _is_missing_identifier(value)
         for value in (
             candidate.item_id,
             candidate.raw_hash,
@@ -173,12 +359,11 @@ def _admission_rejection(candidate: CorpusCandidate) -> str | None:
             candidate.template_group,
             candidate.campaign_group,
             candidate.language_group,
-            candidate.sanitized_training_representation,
         )
     ):
         return "missing_metadata"
     if any(
-        SAFE_IDENTIFIER_PATTERN.fullmatch(value) is None
+        not _is_safe_identifier(value)
         for value in (
             candidate.item_id,
             candidate.label_source,
@@ -401,18 +586,45 @@ class CorpusGovernance:
                     original_label=item.candidate.original_label,
                     final_label=item.candidate.final_label,
                     label_source=item.candidate.label_source,
+                    label_guideline_version=item.candidate.label_guideline_version,
+                    label_evidence_id=item.candidate.label_evidence_id,
+                    reviewer_id=item.candidate.reviewer_id,
+                    reviewed_at_utc=_utc_iso(item.candidate.reviewed_at),
                     review_status=item.candidate.review_status,
+                    review_policy_version=item.candidate.review_policy_version,
                     license_identifier=item.candidate.license_source,
-                    ingested_at_utc=item.candidate.ingested_at.astimezone(
-                        timezone.utc
-                    ).isoformat(),
+                    source_dataset_id=item.candidate.source_dataset_id,
+                    source_version=item.candidate.source_version,
+                    source_evidence_digest=item.candidate.source_evidence_digest,
+                    authorization_basis_id=item.candidate.authorization_basis_id,
+                    authorization_status=item.candidate.authorization_status,
+                    internal_training_allowed=item.candidate.internal_training_allowed,
+                    endpoint_weight_distribution_allowed=(
+                        item.candidate.endpoint_weight_distribution_allowed
+                    ),
+                    authorization_approved_at_utc=_utc_iso(
+                        item.candidate.authorization_approved_at
+                    ),
+                    authorization_expires_at_utc=(
+                        _utc_iso(item.candidate.authorization_expires_at)
+                        if item.candidate.authorization_expires_at is not None
+                        else None
+                    ),
+                    authorization_no_expiry=item.candidate.authorization_no_expiry,
+                    privacy_review_status=item.candidate.privacy_review_status,
+                    sanitization_policy_version=(
+                        item.candidate.sanitization_policy_version
+                    ),
+                    privacy_reviewed_at_utc=_utc_iso(
+                        item.candidate.privacy_reviewed_at
+                    ),
+                    privacy_evidence_digest=item.candidate.privacy_evidence_digest,
+                    ingested_at_utc=_utc_iso(item.candidate.ingested_at),
                     raw_content_digest=item.candidate.raw_hash,
                     normalized_content_digest=item.candidate.normalized_hash,
-                    sanitized_representation_digest=hashlib.sha256(
-                        item.candidate.sanitized_training_representation.encode(
-                            "utf-8"
-                        )
-                    ).hexdigest(),
+                    sanitized_representation_digest=(
+                        item.candidate.sanitized_representation_digest
+                    ),
                     source_group=item.candidate.source_group,
                     language_group=item.candidate.language_group,
                     template_group=item.candidate.template_group,

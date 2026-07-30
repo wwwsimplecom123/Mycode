@@ -33,7 +33,7 @@ class OnnxValidationTests(unittest.TestCase):
         onnx.checker.check_model(model, full_check=True)
         metadata = {item.key: item.value for item in model.metadata_props}
         self.assertEqual(metadata["feature_schema_version"], "2.0")
-        self.assertEqual(metadata["corpus_schema_version"], "2.0")
+        self.assertEqual(metadata["corpus_schema_version"], "3.0")
         self.assertEqual(metadata["assembler_schema_version"], "1.0")
         self.assertEqual(metadata["input_dimension"], "140")
         self.assertEqual(

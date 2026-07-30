@@ -44,6 +44,7 @@ class PackageImportTests(unittest.TestCase):
             NEAR_DUPLICATE_MAX_CHARACTERS,
             TEXT_HASH_DIMENSION,
             ApprovedCorpusItem,
+            AuthorizationStatus,
             CorpusCandidate,
             CorpusGovernance,
             CorpusLabel,
@@ -56,11 +57,12 @@ class PackageImportTests(unittest.TestCase):
             FeaturePipeline,
             PrivacyScanResult,
             PrivacyScanner,
+            PrivacyReviewStatus,
             ReviewStatus,
             SourceLabel,
         )
 
-        self.assertEqual(CORPUS_SCHEMA_VERSION, "2.0")
+        self.assertEqual(CORPUS_SCHEMA_VERSION, "3.0")
         self.assertEqual(TEXT_HASH_DIMENSION, 64)
         self.assertEqual(FEATURE_TEXT_MAX_CHARACTERS, 8192)
         self.assertEqual(FEATURE_URL_MAX_ITEMS, 256)
@@ -71,6 +73,7 @@ class PackageImportTests(unittest.TestCase):
         self.assertEqual(CORPUS_MAX_CANDIDATES, 4096)
         for public_type in (
             ApprovedCorpusItem,
+            AuthorizationStatus,
             CorpusCandidate,
             CorpusGovernance,
             CorpusLabel,
@@ -83,6 +86,7 @@ class PackageImportTests(unittest.TestCase):
             FeaturePipeline,
             PrivacyScanResult,
             PrivacyScanner,
+            PrivacyReviewStatus,
             ReviewStatus,
             SourceLabel,
         ):

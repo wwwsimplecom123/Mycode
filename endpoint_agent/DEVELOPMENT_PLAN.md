@@ -400,15 +400,18 @@ Status: complete
 
 ### Phase 1：Feature Pipeline 与数据集治理
 
-Status: pending
+Status: complete
 
 - 复用现有纯解析、链接、规则和证据函数。
 - 建立版本化 Feature Pipeline。
+- 对文本、URL、附件元数据和认证观察建立确定性资源边界。
 - 实现训练和推理使用同一 transform 的一致性测试。
-- 实现 corpus manifest、许可元数据、去重、聚类和 split。
+- 实现 corpus manifest、许可元数据、跨样本标签冲突、去重和版本化近重复聚类。
+- 实现来源/时间 test 留出与 duplicate/template/campaign/near-duplicate split 隔离。
+- manifest 只保存规范 digest、UTC 时间和非敏感训练溯源标识。
 - 实现隐私扫描，确保 FeatureVector 不包含禁止字段。
 
-完成条件：同一邮件在训练和 endpoint adapter 产生完全一致的 FeatureVector。
+完成条件：同一邮件在训练和 endpoint adapter 产生完全一致且有界的 FeatureVector；Approved Training Corpus 的标签、来源/时间留出、重复组隔离和非敏感训练溯源可确定性复现。
 
 ### Phase 2：基线模型与评估
 
@@ -557,5 +560,4 @@ Status: pending
 
 ## 14. 下一步
 
-下一次开发从 **Phase 1：Feature Pipeline 与数据集治理** 开始。一次只完成一个阶段；阶段完成后运行相关测试、更新本文件的 Status，并检查 `git diff` 确保现有目录没有被修改。
-
+下一次开发从 **Phase 2：基线模型与评估** 开始。一次只完成一个阶段；阶段完成后运行相关测试、更新本文件的 Status，并检查 `git diff` 确保现有目录没有被修改。

@@ -1,3 +1,21 @@
+from .corpus import (
+    CORPUS_MAX_CANDIDATES,
+    CORPUS_SCHEMA_VERSION,
+    NEAR_DUPLICATE_FINGERPRINT_VERSION,
+    NEAR_DUPLICATE_MAX_CHARACTERS,
+    ApprovedCorpusItem,
+    CorpusCandidate,
+    CorpusGovernance,
+    CorpusLabel,
+    CorpusManifest,
+    CorpusManifestEntry,
+    CorpusRejection,
+    CorpusSplitPolicy,
+    CorpusSnapshot,
+    DatasetSplit,
+    ReviewStatus,
+    SourceLabel,
+)
 from .domain import (
     DETECTION_OUTCOME_SCHEMA_VERSION,
     FEATURE_SCHEMA_VERSION,
@@ -7,6 +25,15 @@ from .domain import (
     MailObservation,
     ModelAssessment,
 )
+from .feature_pipeline import (
+    FEATURE_ATTACHMENT_MAX_ITEMS,
+    FEATURE_AUTHENTICATION_MAX_ITEMS,
+    FEATURE_TEXT_MAX_CHARACTERS,
+    FEATURE_URL_MAX_ITEMS,
+    FeaturePipeline,
+    TEXT_HASH_DIMENSION,
+)
+from .privacy import PrivacyScanResult, PrivacyScanner
 
 
 __version__ = "0.1.0"
@@ -16,8 +43,32 @@ __all__ = [
     "MAIL_OBSERVATION_SCHEMA_VERSION",
     "FEATURE_SCHEMA_VERSION",
     "DETECTION_OUTCOME_SCHEMA_VERSION",
+    "CORPUS_SCHEMA_VERSION",
+    "CORPUS_MAX_CANDIDATES",
+    "NEAR_DUPLICATE_FINGERPRINT_VERSION",
+    "NEAR_DUPLICATE_MAX_CHARACTERS",
     "MailObservation",
     "FeatureVector",
     "ModelAssessment",
     "DetectionOutcome",
+    "FeaturePipeline",
+    "TEXT_HASH_DIMENSION",
+    "FEATURE_TEXT_MAX_CHARACTERS",
+    "FEATURE_URL_MAX_ITEMS",
+    "FEATURE_ATTACHMENT_MAX_ITEMS",
+    "FEATURE_AUTHENTICATION_MAX_ITEMS",
+    "CorpusLabel",
+    "SourceLabel",
+    "ReviewStatus",
+    "DatasetSplit",
+    "CorpusCandidate",
+    "CorpusRejection",
+    "CorpusSplitPolicy",
+    "ApprovedCorpusItem",
+    "CorpusManifestEntry",
+    "CorpusManifest",
+    "CorpusSnapshot",
+    "CorpusGovernance",
+    "PrivacyScanResult",
+    "PrivacyScanner",
 ]

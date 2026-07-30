@@ -78,8 +78,8 @@ class FeatureVectorTests(unittest.TestCase):
                 "schema_version",
             ],
         )
-        self.assertEqual(FEATURE_SCHEMA_VERSION, "1.0")
-        self.assertEqual(vector.schema_version, "1.0")
+        self.assertEqual(FEATURE_SCHEMA_VERSION, "2.0")
+        self.assertEqual(vector.schema_version, "2.0")
         with self.assertRaises(FrozenInstanceError):
             vector.schema_version = "2.0"
 

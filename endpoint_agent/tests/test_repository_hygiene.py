@@ -27,7 +27,9 @@ class RepositoryHygieneTests(unittest.TestCase):
         for relative_path in (
             "endpoint_agent/training/data/corpus.jsonl",
             "endpoint_agent/training/artifacts/training-run.bin",
+            "endpoint_agent/training/snapshots/corpus-v1.json",
             "endpoint_agent/training_data/corpus.jsonl",
+            "endpoint_agent/corpus_snapshots/corpus-v1.json",
             "endpoint_agent/datasets/snapshot.jsonl",
         ):
             with self.subTest(path=relative_path):

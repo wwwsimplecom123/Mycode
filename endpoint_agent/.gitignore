@@ -8,7 +8,9 @@
 # Approved Training Corpus and training outputs
 /training/data/
 /training/artifacts/
+/training/snapshots/
 /training_data/
+/corpus_snapshots/
 /datasets/
 
 # Per-user protected keys

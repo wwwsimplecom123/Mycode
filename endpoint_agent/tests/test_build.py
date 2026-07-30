@@ -48,6 +48,9 @@ class WheelBuildTests(unittest.TestCase):
                 expected_names = {
                     "shielddome_endpoint/__init__.py",
                     "shielddome_endpoint/domain.py",
+                    "shielddome_endpoint/feature_pipeline.py",
+                    "shielddome_endpoint/corpus.py",
+                    "shielddome_endpoint/privacy.py",
                     "shielddome_endpoint-0.1.0.dist-info/METADATA",
                     "shielddome_endpoint-0.1.0.dist-info/WHEEL",
                     "shielddome_endpoint-0.1.0.dist-info/RECORD",

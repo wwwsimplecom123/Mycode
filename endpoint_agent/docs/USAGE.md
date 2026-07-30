@@ -2,23 +2,27 @@
 
 ## 1. 当前可用范围
 
-ShieldDome Endpoint Agent 是面向单个 Windows 用户、完全离线运行的本地钓鱼邮件检测产品。目前仓库只完成了 **Phase 0：脚手架与约束测试**，可用于：
+当前仓库实现到 **Phase 1：Feature Pipeline 与数据集治理**，提供：
 
-- 构建并导入独立 Python 包 `shielddome_endpoint`；
-- 使用首批不可变领域类型定义后续模块之间的数据契约；
-- 运行离线能力、目录隔离和运行产物忽略规则测试；
-- 构建最小 Python wheel，验证打包配置。
+- 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
+- Phase 0 的不可变领域类型和版本字段；
+- 训练与 Endpoint 共用的 `FeaturePipeline.transform`；
+- Approved Training Corpus 的 `CorpusGovernance.prepare`；
+- 不可变的来源/时间 test 留出 `CorpusSplitPolicy`；
+- 只含 digest 和稳定标识的训练溯源 manifest；
+- `FeatureVector` 和 corpus manifest 的 `PrivacyScanner`；
+- 离线能力、隐私边界、数据产物忽略和 Wheel 构建测试。
 
-当前版本还不能分析真实邮件，也没有模型推理、Native Messaging、本地数据库、加密存储、托盘或控制台界面。请勿把当前包作为可交付的终端检测程序使用。
+当前包只转换已经规范化的 `MailObservation`，不会读取邮箱、解析 `.eml`、训练或加载模型，也不会输出钓鱼概率或最终风险。它不是可交付的终端检测程序。
 
 ## 2. 环境要求
 
 - Windows 10/11 64 位；
 - Python 3.12；
 - Git，可执行 `git check-ignore`；
-- 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行下列命令。
+- 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-当前 Phase 0 没有第三方运行时依赖，不需要访问互联网安装依赖。
+Phase 0-1 没有第三方运行时依赖，不需要下载模型、数据集或 NLTK 资源。
 
 ## 3. 目录概览
 
@@ -28,159 +32,260 @@ endpoint_agent/
   README.md                         产品定义与目标架构
   DEVELOPMENT_PLAN.md               分阶段开发基线
   pyproject.toml                    Python 3.12 与 PEP 517 构建配置
-  _build_backend.py                 零外部依赖的本地 wheel 构建后端
-  .gitignore                        本地敏感数据和构建产物忽略规则
+  _build_backend.py                 零外部依赖的本地 Wheel 构建后端
+  .gitignore                        敏感数据、corpus 和构建产物忽略规则
   docs/
     USAGE.md                        本文档
-    plans/2026-07-29-phase-0.md      Phase 0 实施计划
+    plans/                          分阶段实施计划
   src/shielddome_endpoint/
     __init__.py                     包版本与公开导出
-    domain.py                       Phase 0 领域类型
+    domain.py                       核心领域类型
+    feature_pipeline.py             确定性特征转换
+    corpus.py                       Corpus Governance 深模块
+    privacy.py                      FeatureVector/manifest 隐私扫描
   tests/
-    test_package.py                 包导入测试
-    test_domain.py                  领域契约测试
-    test_offline_constraints.py     离线边界测试
-    test_repository_hygiene.py      Git 忽略规则测试
+    test_feature_pipeline.py        Feature Pipeline 公开行为
+    test_corpus_governance.py       corpus 准入、去重和 split
+    test_privacy.py                 隐私扫描
+    test_offline_constraints.py     离线边界
+    test_repository_hygiene.py      Git 忽略规则
 ```
 
-## 4. 运行测试
+## 4. Feature Pipeline
 
-在仓库根目录运行完整 Phase 0 测试：
+稳定入口：
+
+```python
+FeaturePipeline.transform(observation: MailObservation) -> FeatureVector
+```
+
+训练和 Endpoint 推理准备必须直接调用同一入口，不能各自实现第二套转换逻辑。
+
+```python
+from datetime import datetime, timezone
+
+from shielddome_endpoint import FeaturePipeline, MailObservation
+
+
+observation = MailObservation(
+    source_kind="browser",
+    source_message_id="synthetic-message-001",
+    subject="紧急 Account notice",
+    sender="security@example.test",
+    reply_to="helpdesk@example.test",
+    recipient_summary=("current-user",),
+    sanitized_body_text="请通过正常公司渠道 verify this request.",
+    authentication_observations=(
+        ("spf", "pass"),
+        ("dkim", "pass"),
+        ("dmarc", "pass"),
+    ),
+    normalized_links=("https://portal.example.test/notice",),
+    attachment_metadata=(("name", "notice.pdf"),),
+    language_hint="mixed",
+    observed_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+)
+
+vector = FeaturePipeline().transform(observation)
+```
+
+转换具有以下性质：
+
+- 纯内存、确定性、无网络、无文件写入；
+- 不依赖根目录 `shielddome/` 或 `phishingDP-main/`；
+- 数值和类别特征名称、顺序固定；
+- 覆盖主题/正文/发件人/Reply-To、认证、URL、附件元数据、语言和有限意图；
+- 缺失字段写入稳定的 `missing_value_mask`；
+- 文本使用 SHA-256 signed hashing，固定 64 维并执行 L2 规范化；
+- Hashing 输入最多 8192 个规范化字符，维度不会随 corpus 增长；
+- 主题/正文分析总输入最多 8192 字符，长度特征采用饱和计数；
+- 每封观察最多处理 256 个 URL、256 条附件元数据和 64 条认证观察；
+- 超限项按原 tuple 顺序确定性截断，不影响边界内结果；
+- `text_input` 始终为 `None`，不保留原始正文或 Token；
+- 附件只读取传入的名称等元数据，不打开或读取附件。
+
+当前 `FEATURE_SCHEMA_VERSION` 为 `2.0`。本版本记录了上述截断和饱和语义；修改特征名称、顺序、含义、Hashing 维度、规范化或资源边界时，必须显式升级版本并同步训练、测试和 manifest。
+
+## 5. Corpus Governance
+
+稳定入口：
+
+```python
+CorpusGovernance.prepare(
+    candidates: tuple[CorpusCandidate, ...],
+    split_policy: CorpusSplitPolicy = CorpusSplitPolicy(),
+) -> CorpusSnapshot
+```
+
+候选和输出均为 `frozen=True, slots=True` 的不可变类型：
+
+```python
+from datetime import datetime, timezone
+import hashlib
+
+from shielddome_endpoint import (
+    FEATURE_SCHEMA_VERSION,
+    CorpusCandidate,
+    CorpusGovernance,
+    CorpusLabel,
+    CorpusSplitPolicy,
+    ReviewStatus,
+    SourceLabel,
+)
+
+
+candidate = CorpusCandidate(
+    item_id="synthetic-item-001",
+    final_label=CorpusLabel.PHISHING,
+    original_label=SourceLabel.PHISHING,
+    label_source="human-review",
+    review_status=ReviewStatus.APPROVED,
+    license_source="company-authorized-synthetic",
+    raw_hash=hashlib.sha256(b"synthetic-raw-001").hexdigest(),
+    normalized_hash=hashlib.sha256(b"synthetic-normalized-001").hexdigest(),
+    template_group="synthetic-template-001",
+    campaign_group="synthetic-campaign-001",
+    language_group="mixed",
+    source_group="synthetic",
+    ingested_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+    feature_schema_version=FEATURE_SCHEMA_VERSION,
+    sanitized_training_representation="sanitized synthetic representation",
+)
+
+policy = CorpusSplitPolicy(
+    test_source_groups=("independent-test-source",),
+    test_after=datetime(2026, 8, 1, tzinfo=timezone.utc),
+)
+snapshot = CorpusGovernance().prepare((candidate,), split_policy=policy)
+```
+
+`prepare` 隐藏并统一执行：
+
+- 来源、许可证、审核状态、必填元数据和 feature schema 准入；
+- benign/phishing 最终标签与 spam/ham/phishing/benign 原始语义检查；
+- spam/ham 非人工来源禁止自动升级；
+- 明确 phishing/benign 标签冲突拒绝；
+- 相同 raw 或 normalized SHA-256 的不同最终标签整组拒绝；
+- raw/normalized digest 必须是 64 位小写规范 SHA-256；
+- 许可证和所有进入 manifest 的 group/source 标识不得是路径、网络地址或数据内容；
+- ingestion time 必须带时区，manifest 统一序列化为 UTC；
+- raw hash 精确去重，并按 item ID 稳定选择 canonical；
+- normalized hash 转换为不暴露原 hash 的稳定 duplicate group；
+- 仅基于前 4096 字符 sanitized representation 的保守 `near-v1` 指纹；
+- template、campaign、duplicate、near-duplicate group 的连通分量隔离；
+- 指定 source group 或严格晚于 cutoff 的任一组员会使整个连通分量进入 test；
+- 使用 SHA-256 稳定分配 70% train、15% validation、15% test；
+- 单次最多接收 4096 个候选；超限批次整体以稳定错误码拒绝；
+- manifest 记录原始/最终标签、标签来源、审核、许可证标识、UTC 时间、raw/normalized/representation SHA-256、全部分组、schema 和 split；
+- manifest 不保存 sanitized representation 正文、密码、Token、完整 URL query 或私有路径。
+
+当前 `CORPUS_SCHEMA_VERSION` 为 `2.0`。`CorpusSplitPolicy.test_after` 的语义是“严格晚于截止点”；等于截止点的样本继续使用默认确定性 split。默认 policy 不强制留出，保持原调用方式兼容。
+
+`CorpusSnapshot` 只是内存领域结果。本阶段不提供文件导入、snapshot 持久化、数据加载器或训练入口。
+
+## 6. 隐私扫描
+
+```python
+from shielddome_endpoint import PrivacyScanner
+
+
+scanner = PrivacyScanner()
+feature_result = scanner.scan_feature_vector(vector)
+manifest_result = scanner.scan_manifest(snapshot.manifest)
+```
+
+扫描结果只包含 `safe` 和稳定违规代码，不回显命中内容。可在测试或调用边界通过 `forbidden_values` 传入不得出现的原文、地址或完整 URL，确认其未进入输出。
+
+扫描范围包括：
+
+- 非空 `FeatureVector.text_input`；
+- 调用方给定的禁止值；
+- password、Token、API Key、Authorization 等赋值形态；
+- 带完整 query 的 URL；
+- 典型 Windows/Linux 用户私有路径。
+
+隐私扫描是结构化输出的防回归门禁，不替代候选数据的人工脱敏和审核。
+
+## 7. 测试与包导入
+
+在仓库根目录运行完整 Endpoint Agent 测试：
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-预期结果是发现并运行 18 项测试。命令必须以退出码 0 结束，且没有 failure、error 或 skip，才能认为当前 Phase 0 验证通过。
+当前应发现 49 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
 
-运行单个测试模块：
+运行 Phase 1 单个测试模块：
 
 ```powershell
-python -m unittest discover -s endpoint_agent/tests -p "test_package.py" -v
-python -m unittest discover -s endpoint_agent/tests -p "test_domain.py" -v
-python -m unittest discover -s endpoint_agent/tests -p "test_offline_constraints.py" -v
-python -m unittest discover -s endpoint_agent/tests -p "test_repository_hygiene.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_feature_pipeline.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_corpus_governance.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_privacy.py" -v
 ```
 
-如果系统 PATH 中没有 `python`，请使用已安装的 Python 3.12 可执行文件替换命令中的 `python`。不要为了运行 Phase 0 测试引入 pytest。
-
-## 5. 验证包导入
-
-源码采用 `src` 布局。无需安装即可在 PowerShell 中执行导入检查：
+无需安装即可验证根包导入：
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path endpoint_agent\src).Path
-python -c "import shielddome_endpoint; print(shielddome_endpoint.__version__)"
+python -c "import shielddome_endpoint as s; print(s.__version__, s.FEATURE_SCHEMA_VERSION, s.CORPUS_SCHEMA_VERSION)"
 ```
 
-预期输出：
-
-```text
-0.1.0
-```
-
-根包公开导出：
-
-- `MailObservation`
-- `FeatureVector`
-- `ModelAssessment`
-- `DetectionOutcome`
-- `MAIL_OBSERVATION_SCHEMA_VERSION`
-- `FEATURE_SCHEMA_VERSION`
-- `DETECTION_OUTCOME_SCHEMA_VERSION`
-- `__version__`
-
-## 6. 领域类型示例
-
-领域类型使用 `frozen=True` 和 `slots=True`，集合字段使用 tuple。构造完成后不能修改字段。
-
-```python
-from datetime import datetime, timezone
-
-from shielddome_endpoint import MailObservation
-
-
-observation = MailObservation(
-    source_kind="browser",
-    source_message_id="local-message-001",
-    subject="Account notice",
-    sender="security@example.test",
-    reply_to=None,
-    recipient_summary=("current-user",),
-    sanitized_body_text="Verify through the usual company channel.",
-    authentication_observations=(("spf", "pass"),),
-    normalized_links=("https://example.test/notice",),
-    attachment_metadata=(("name", "notice.pdf"),),
-    language_hint="en",
-    observed_at=datetime.now(timezone.utc),
-)
-```
-
-这些类型当前只提供数据契约，不执行字段验证、邮件解析、风险计算、持久化或网络通信。
-
-## 7. 构建 wheel
-
-使用本地源码和项目内置的零外部依赖 PEP 517 后端进行离线构建：
+## 8. 离线构建 Wheel
 
 ```powershell
 python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
 ```
 
-该命令需要当前 Python 环境可执行 `python -m pip`，但不要求预装或在线下载 setuptools、wheel、flit 或 hatchling。`--no-index` 会阻止构建过程访问包索引；`pyproject.toml` 的 `[build-system].requires` 为空，构建由 `endpoint_agent/_build_backend.py` 完成。
+构建由 `endpoint_agent/_build_backend.py` 完成，不要求 setuptools、wheel、Flit 或 Hatchling。`--no-index` 阻止访问包索引，`pyproject.toml` 没有第三方运行时依赖。
 
-成功时会生成类似文件：
+成功时生成：
 
 ```text
 endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 ```
 
-`dist/`、`build/` 和 `*.egg-info/` 均已由 `endpoint_agent/.gitignore` 忽略。构建验证完成后可以删除这些可再生成产物。
+`dist/` 属于可再生成且已忽略的本地产物。
 
-## 8. 离线和数据边界
+## 9. 数据和离线边界
 
-生产源码目录 `endpoint_agent/src/shielddome_endpoint/` 必须保持：
-
-- 不导入网络客户端或 socket 能力；
-- 不依赖 FastAPI、Flask、Uvicorn、aiohttp 等服务框架；
-- 不包含 HTTP 或 WebSocket endpoint；
-- 不监听 TCP/UDP 端口；
-- 不调用中心后台、外部模型、遥测或更新服务。
-
-下列内容必须保留在 Git 之外：
+以下内容必须保留在 Git 之外：
 
 - 模型文件和模型包；
-- 训练数据和训练输出；
-- 本地密钥与证书私钥；
-- 日志；
-- SQLite 数据库及 WAL、SHM、journal 文件；
-- 诊断包；
-- Python 缓存、虚拟环境和构建产物。
+- 原始训练数据、Approved Training Corpus 数据和 snapshot；
+- 训练 artifacts、指标和输出；
+- 本地密钥、日志、SQLite 数据库及临时文件；
+- 诊断包、缓存、虚拟环境和构建产物。
 
-Phase 0 不创建邮件、证据或用户数据库。原始邮件、正文和附件内容不得加入仓库。
+生产包必须保持：
 
-## 9. 修改后的最低验证
+- 不导入网络客户端或 socket；
+- 不依赖 Flask、FastAPI、Uvicorn、aiohttp 或 WebSocket 框架；
+- 不监听 TCP/UDP 端口；
+- 不调用中心后台、外部模型、信誉服务、遥测或更新服务；
+- 不下载、打开、解压、预览或执行附件。
 
-每次修改 Endpoint Agent 后至少执行：
+## 10. 尚未实现
+
+Phase 1 明确不包含：
+
+- 模型训练、Logistic Regression、TensorFlow、Keras 或 ONNX；
+- 概率校准、不确定拒判、模型加载或推理；
+- Detection Kernel、风险融合或 DetectionOutcome 生成；
+- Native Messaging、浏览器插件或本地网络服务；
+- 数据库、DPAPI、AES-GCM、15 天留存；
+- 托盘、控制台、`.eml` 或邮件客户端 adapter。
+
+下一阶段是 **Phase 2：基线模型与评估**。开始前必须重新核对 `DEVELOPMENT_PLAN.md` 状态和新任务授权，不得从本使用文档推断后续能力已经存在。
+
+## 11. 修改后的最低验证
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
 git status --short
-git diff --name-status
-git diff
+git diff --stat
+git diff -- endpoint_agent
 ```
 
-检查以下事项：
-
-1. 测试输出和退出码与修改范围一致；
-2. 新增生产依赖和 import 没有突破离线边界；
-3. 模型、数据、密钥、日志、数据库和构建产物未进入 Git 状态；
-4. 业务代码修改只位于 `endpoint_agent/`；
-5. 没有提前加入尚未进入当前开发阶段的实现。
-
-## 10. 进一步阅读
-
-- `endpoint_agent/README.md`：产品定义、目标架构和非目标；
-- `endpoint_agent/DEVELOPMENT_PLAN.md`：已确认产品决策、阶段顺序和完成条件；
-- `endpoint_agent/AGENTS.md`：参与开发的工程师和编码代理必须遵守的约束；
-- 根目录 `CONTEXT.md`：Endpoint Agent 统一领域语言；
-- 根目录 `AGENTS.md`：ShieldDome 仓库级协作和安全要求。
+同时确认生产源码仍由离线 guard 全量扫描，corpus 数据/snapshot/训练输出被忽略，且业务代码修改只位于 `endpoint_agent/`。

@@ -29,5 +29,62 @@ class PackageImportTests(unittest.TestCase):
         self.assertIsNotNone(ModelAssessment)
         self.assertIsNotNone(DetectionOutcome)
         self.assertEqual(MAIL_OBSERVATION_SCHEMA_VERSION, "1.0")
-        self.assertEqual(FEATURE_SCHEMA_VERSION, "1.0")
+        self.assertEqual(FEATURE_SCHEMA_VERSION, "2.0")
         self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "1.0")
+
+    def test_package_reexports_phase_one_public_interfaces(self):
+        from shielddome_endpoint import (
+            CORPUS_SCHEMA_VERSION,
+            CORPUS_MAX_CANDIDATES,
+            FEATURE_ATTACHMENT_MAX_ITEMS,
+            FEATURE_AUTHENTICATION_MAX_ITEMS,
+            FEATURE_TEXT_MAX_CHARACTERS,
+            FEATURE_URL_MAX_ITEMS,
+            NEAR_DUPLICATE_FINGERPRINT_VERSION,
+            NEAR_DUPLICATE_MAX_CHARACTERS,
+            TEXT_HASH_DIMENSION,
+            ApprovedCorpusItem,
+            CorpusCandidate,
+            CorpusGovernance,
+            CorpusLabel,
+            CorpusManifest,
+            CorpusManifestEntry,
+            CorpusRejection,
+            CorpusSplitPolicy,
+            CorpusSnapshot,
+            DatasetSplit,
+            FeaturePipeline,
+            PrivacyScanResult,
+            PrivacyScanner,
+            ReviewStatus,
+            SourceLabel,
+        )
+
+        self.assertEqual(CORPUS_SCHEMA_VERSION, "2.0")
+        self.assertEqual(TEXT_HASH_DIMENSION, 64)
+        self.assertEqual(FEATURE_TEXT_MAX_CHARACTERS, 8192)
+        self.assertEqual(FEATURE_URL_MAX_ITEMS, 256)
+        self.assertEqual(FEATURE_ATTACHMENT_MAX_ITEMS, 256)
+        self.assertEqual(FEATURE_AUTHENTICATION_MAX_ITEMS, 64)
+        self.assertEqual(NEAR_DUPLICATE_FINGERPRINT_VERSION, "1.0")
+        self.assertEqual(NEAR_DUPLICATE_MAX_CHARACTERS, 4096)
+        self.assertEqual(CORPUS_MAX_CANDIDATES, 4096)
+        for public_type in (
+            ApprovedCorpusItem,
+            CorpusCandidate,
+            CorpusGovernance,
+            CorpusLabel,
+            CorpusManifest,
+            CorpusManifestEntry,
+            CorpusRejection,
+            CorpusSplitPolicy,
+            CorpusSnapshot,
+            DatasetSplit,
+            FeaturePipeline,
+            PrivacyScanResult,
+            PrivacyScanner,
+            ReviewStatus,
+            SourceLabel,
+        ):
+            with self.subTest(public_type=public_type):
+                self.assertIsNotNone(public_type)

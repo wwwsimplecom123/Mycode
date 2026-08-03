@@ -118,4 +118,4 @@ confusion matrix 的两行依次是实际 benign、实际 phishing；三列依�
 
 基线 Logistic Regression 由 skl2onnx 转换；identity 使用标准 `Identity`，sigmoid 校准链路使用标准 `Mul`、`Add` 和 `Sigmoid` 算子。模型不使用 custom operator 或 external data。ONNX metadata 记录最终选中的 calibration method。ONNX Runtime 固定 CPU provider 和单线程顺序执行，对固定合成输入比较 Python/ONNX phishing probability，默认最大绝对误差容差为 `1e-6`。模型必须小于 2 GB，并记录规范 SHA-256。
 
-本代码是训练侧验证，不是 Phase 4 的生产 Local Inference adapter。终端加载、失败降级、超时和 Risk Fusion 尚未实现。Phase 3 还受真实、许可明确、人工审核且去泄漏的 Approved Training Corpus 阻塞；不能用当前合成 fixture 选择正式文本编码模型。
+本代码是训练侧验证，不是 Phase 4B 的生产 Local Inference adapter。Phase 4A 已实现模型无关的 Local Inference seam、Model Assessment 校验、失败/超时降级和 Risk Fusion，但没有加载这里生成的 ONNX，也没有声称完成真实模型 3 秒推理验证。Phase 3 仍受真实、许可明确、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`；不能用当前合成 fixture 选择正式文本编码模型或满足 Phase 4B。

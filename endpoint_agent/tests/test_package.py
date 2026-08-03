@@ -18,10 +18,21 @@ class PackageImportTests(unittest.TestCase):
             DETECTION_OUTCOME_SCHEMA_VERSION,
             FEATURE_SCHEMA_VERSION,
             MAIL_OBSERVATION_SCHEMA_VERSION,
+            MODEL_ASSESSMENT_SCHEMA_VERSION,
+            DetectionExecutionState,
             DetectionOutcome,
             FeatureVector,
+            GenericAction,
             MailObservation,
             ModelAssessment,
+            ModelConfidenceState,
+            ModelExecutionStatus,
+            PrivateRuleEvidence,
+            RiskLevel,
+            RuleAssessment,
+            RuleCategory,
+            RuleSeverity,
+            StructuredPrivateEvidence,
         )
 
         self.assertIsNotNone(MailObservation)
@@ -30,7 +41,51 @@ class PackageImportTests(unittest.TestCase):
         self.assertIsNotNone(DetectionOutcome)
         self.assertEqual(MAIL_OBSERVATION_SCHEMA_VERSION, "1.0")
         self.assertEqual(FEATURE_SCHEMA_VERSION, "2.0")
-        self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "1.0")
+        self.assertEqual(MODEL_ASSESSMENT_SCHEMA_VERSION, "1.0")
+        self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "2.0")
+        for public_type in (
+            DetectionExecutionState,
+            GenericAction,
+            ModelConfidenceState,
+            ModelExecutionStatus,
+            PrivateRuleEvidence,
+            RiskLevel,
+            RuleAssessment,
+            RuleCategory,
+            RuleSeverity,
+            StructuredPrivateEvidence,
+        ):
+            self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_four_a_interfaces(self):
+        from shielddome_endpoint import (
+            DetectionKernel,
+            InferenceContext,
+            LocalInference,
+            UnavailableModelAdapter,
+        )
+
+        for public_type in (
+            DetectionKernel,
+            InferenceContext,
+            LocalInference,
+            UnavailableModelAdapter,
+        ):
+            self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_four_a_one_interfaces(self):
+        from shielddome_endpoint import (
+            FeatureVectorValidationError,
+            LocalDetectionService,
+            LocalRuleEvaluator,
+        )
+
+        for public_type in (
+            FeatureVectorValidationError,
+            LocalDetectionService,
+            LocalRuleEvaluator,
+        ):
+            self.assertIsNotNone(public_type)
 
     def test_package_reexports_phase_one_public_interfaces(self):
         from shielddome_endpoint import (

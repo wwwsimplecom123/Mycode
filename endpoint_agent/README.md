@@ -2,6 +2,12 @@
 
 This directory contains the design and, later, the implementation of the standalone Windows Endpoint Agent. The existing ShieldDome API, Worker, web console, database, and browser extension remain unchanged.
 
+## Current Implementation Status
+
+Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 remains pending.
+
+The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, and private/minimal result projections. With no model adapter, or when a model adapter is unavailable, invalid, timed out, or raises an exception, detection still returns the deterministic rule result. There is no Native Messaging implementation, browser extension, production ONNX Runtime adapter, or formal model in this repository.
+
 ## Product Definition
 
 ShieldDome Endpoint Agent is a per-Windows-user, offline phishing-email detection application.
@@ -27,9 +33,10 @@ flowchart LR
     EML[EML import] --> Intake
     Future[Future mail-client adapter] --> Intake
 
-    Intake --> Kernel[Detection Kernel module]
-    Kernel --> Parser[Existing ShieldDome parsing and rules]
-    Kernel --> Features[Feature Pipeline module]
+    Intake --> LocalDetection[Local Detection Service module]
+    LocalDetection --> Features[Feature Pipeline module]
+    Features --> Rules[Local Rule Evaluator module]
+    LocalDetection --> Kernel[Detection Kernel module]
     Features --> Inference[Local Inference module]
     Kernel --> Fusion[Risk Fusion module]
     Inference --> Fusion
@@ -42,19 +49,32 @@ flowchart LR
     Evidence --> Dashboard[Personal Security Dashboard]
 ```
 
-The Detection Kernel is the top-level deep module. Callers cross one interface and do not need to understand parsing, model runtime, evidence weights, abstention, storage, or result projection.
+The Local Detection Service is the future Native Messaging host's top-level deep module. Callers submit only `MailObservation` facts plus host-controlled identity/time context and do not provide rules, scores, Model Assessment, execution state, action, retention, role, permission, or ownership conclusions.
 
 ## Deep Modules
+
+### Local Detection Service
+
+Interface:
+
+```text
+detect(observation, local_event_id, observed_now) -> detection_outcome
+```
+
+Phase 4A.1 fixes the trusted local chain as `MailObservation → FeaturePipeline.transform → LocalRuleEvaluator.evaluate → DetectionKernel.detect → DetectionOutcome`. A Local Inference adapter may be injected only when constructing the module and defaults to `UnavailableModelAdapter`; Feature Pipeline, local rules, risk fusion, and result projection cannot be replaced by the browser. This is the only detection seam intended for the Phase 5 Native Messaging host.
+
+The browser is an untrusted observation source. It must never supply `RuleAssessment`, score contribution, strong-evidence flags, final score/level, `ModelAssessment`, execution state, action, retention deadline, user role/permission, or a trusted ownership conclusion for a local event ID. Phase 4A.1 records this interface but does not implement protocol parsing, Native Messaging, or an extension.
 
 ### Detection Kernel
 
 Interface:
 
 ```text
-analyze(mail_observation) -> detection_outcome
+detect(feature_vector, rule_assessments, local_event_id, detected_at, inference_context)
+  -> detection_outcome
 ```
 
-Implementation hides parsing, feature extraction, rule analysis, model inference, similarity calibration, failure degradation, risk fusion, evidence persistence, and result projection.
+The Phase 4A implementation hides Local Inference invocation, Model Assessment validation, adapter-failure degradation, deterministic risk fusion, private evidence projection and the four-field plugin projection. Phase 4A.1 keeps the Kernel interface available for internal composition while moving future intake callers to Local Detection Service, which generates local rules. Mail parsing, protocol intake, similarity lookup, evidence persistence and UI remain outside the current implementation.
 
 ### Mail Intake
 
@@ -83,7 +103,9 @@ Feature families:
 
 ### Local Inference
 
-The first production adapter uses ONNX Runtime on CPU. A deterministic fake adapter supports tests.
+The stable Phase 4A seam accepts a `FeatureVector` plus an explicit inference budget. The production `UnavailableModelAdapter` reports that no model is configured without inventing probability or model version and without network/file side effects. Deterministic fake adapters exist only under `tests/`.
+
+Phase 4B will add the first production ONNX Runtime CPU adapter only after Phase 3 produces a release-approved Unified Model Release. No empty or misleading ONNX adapter placeholder is present.
 
 Output is a `ModelAssessment` containing:
 
@@ -105,6 +127,11 @@ Risk Fusion combines deterministic evidence, Model Assessment, and bounded simil
 - Similar phishing examples have a bounded risk effect.
 - Strong authentication, blacklist, URL and attachment-metadata evidence cannot be cancelled by similarity.
 - Model failure always degrades to deterministic rules.
+- Duplicate rule IDs contribute once using a stable conservative selection.
+- Strong rule severities establish risk floors of 20, 40, 70 and 90.
+- Confident phishing contributes at most 25 points; confident benign removes at most 5 and never crosses a strong floor.
+- An uncertain model adds no score but, without stronger rule advice, projects `verify_sender` instead of `continue`.
+- Final scores are deterministically clamped to 0–100 and mapped centrally to low, medium, high or critical.
 
 ### Local Evidence Store
 

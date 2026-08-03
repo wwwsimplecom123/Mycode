@@ -3,7 +3,7 @@ from enum import StrEnum
 import re
 
 from .corpus import CorpusCandidate, CorpusManifest
-from .domain import FeatureVector
+from .domain import DetectionOutcome, FeatureVector, RuleAssessment
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +62,17 @@ def _scan_strings(
 
 
 class PrivacyScanner:
+    def scan_rule_assessments(
+        self,
+        assessments: tuple[RuleAssessment, ...],
+        forbidden_values: tuple[str, ...] = (),
+    ) -> PrivacyScanResult:
+        violations = _scan_strings(_string_values(assessments), forbidden_values)
+        return PrivacyScanResult(
+            safe=not violations,
+            violations=violations,
+        )
+
     def scan_candidate(
         self,
         candidate: CorpusCandidate,
@@ -93,6 +104,17 @@ class PrivacyScanner:
         forbidden_values: tuple[str, ...] = (),
     ) -> PrivacyScanResult:
         violations = _scan_strings(_string_values(manifest), forbidden_values)
+        return PrivacyScanResult(
+            safe=not violations,
+            violations=violations,
+        )
+
+    def scan_detection_outcome(
+        self,
+        outcome: DetectionOutcome,
+        forbidden_values: tuple[str, ...] = (),
+    ) -> PrivacyScanResult:
+        violations = _scan_strings(_string_values(outcome), forbidden_values)
         return PrivacyScanResult(
             safe=not violations,
             violations=violations,

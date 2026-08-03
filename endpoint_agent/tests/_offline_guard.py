@@ -32,6 +32,7 @@ FORBIDDEN_DISTRIBUTIONS = frozenset(
         "fastapi",
         "flask",
         "httpx",
+        "onnxruntime",
         "requests",
         "starlette",
         "uvicorn",
@@ -40,6 +41,7 @@ FORBIDDEN_DISTRIBUTIONS = frozenset(
     }
 )
 NETWORK_URL_PREFIXES = ("http://", "https://", "ws://", "wss://")
+FORBIDDEN_LISTENER_METHODS = frozenset({"bind", "listen"})
 
 
 def _dependency_name(requirement: str) -> str:
@@ -50,8 +52,12 @@ def _dependency_name(requirement: str) -> str:
 def scan_offline_violations(
     source_root: Path,
     pyproject_path: Path,
+    additional_forbidden_import_roots: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     violations: list[str] = []
+    forbidden_import_roots = FORBIDDEN_IMPORT_ROOTS | frozenset(
+        additional_forbidden_import_roots
+    )
 
     for source_path in sorted(source_root.rglob("*.py")):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
@@ -64,7 +70,7 @@ def scan_offline_violations(
                 imported_roots = (node.module.split(".", 1)[0],)
 
             for imported_root in imported_roots:
-                if imported_root in FORBIDDEN_IMPORT_ROOTS:
+                if imported_root in forbidden_import_roots:
                     violations.append(
                         f"{relative_path}: forbidden import {imported_root}"
                     )
@@ -72,6 +78,15 @@ def scan_offline_violations(
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 if node.value.lower().startswith(NETWORK_URL_PREFIXES):
                     violations.append(f"{relative_path}: forbidden network URL literal")
+
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in FORBIDDEN_LISTENER_METHODS
+            ):
+                violations.append(
+                    f"{relative_path}: forbidden listener call {node.func.attr}"
+                )
 
     configuration = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
     dependencies = configuration.get("project", {}).get("dependencies", [])

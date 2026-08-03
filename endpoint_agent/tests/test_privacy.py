@@ -22,12 +22,77 @@ from shielddome_endpoint.corpus import (
     ReviewStatus,
     SourceLabel,
 )
-from shielddome_endpoint.domain import FEATURE_SCHEMA_VERSION, FeatureVector, MailObservation
+from shielddome_endpoint.domain import (
+    FEATURE_SCHEMA_VERSION,
+    DetectionExecutionState,
+    DetectionOutcome,
+    FeatureVector,
+    GenericAction,
+    PrivateRuleEvidence,
+    RiskLevel,
+    RuleCategory,
+    StructuredPrivateEvidence,
+    MailObservation,
+)
 from shielddome_endpoint.feature_pipeline import FeaturePipeline
+from shielddome_endpoint.local_detection import LocalDetectionService
 from shielddome_endpoint.privacy import PrivacyScanner
+from shielddome_endpoint.rule_evaluator import LocalRuleEvaluator
 
 
 class PrivacyScannerTests(unittest.TestCase):
+    def test_local_rule_and_detection_outputs_do_not_expose_observation_values(self):
+        private_values = (
+            "Urgent password=fictional-secret CEO request",
+            "private.user@example.test",
+            "outside.user@outside.test",
+            "http://192.0.2.10/login?token=fictional-token",
+            "invoice-private.pdf.exe",
+            "C:\\Users\\Private\\mail.eml",
+        )
+        observation = MailObservation(
+            source_kind="browser",
+            source_message_id="synthetic-private-rules",
+            subject=private_values[-1],
+            sender=private_values[1],
+            reply_to=private_values[2],
+            recipient_summary=("current-user",),
+            sanitized_body_text=private_values[0],
+            authentication_observations=(
+                ("spf", "fail"),
+                ("dkim", "fail"),
+                ("dmarc", "fail"),
+            ),
+            normalized_links=(private_values[3],),
+            attachment_metadata=(("name", private_values[4]),),
+            language_hint="en",
+            observed_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        )
+        vector = FeaturePipeline().transform(observation)
+        rules = LocalRuleEvaluator().evaluate(vector)
+        outcome = LocalDetectionService().detect(
+            observation,
+            local_event_id="event-private-local-rules",
+            observed_now=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        )
+
+        rule_scan = PrivacyScanner().scan_rule_assessments(
+            rules,
+            forbidden_values=private_values,
+        )
+        outcome_scan = PrivacyScanner().scan_detection_outcome(
+            outcome,
+            forbidden_values=private_values,
+        )
+
+        self.assertTrue(rule_scan.safe)
+        self.assertEqual(rule_scan.violations, ())
+        self.assertTrue(outcome_scan.safe)
+        self.assertEqual(outcome_scan.violations, ())
+        for private_value in private_values:
+            self.assertNotIn(private_value, repr(rules))
+            self.assertNotIn(private_value, repr(outcome))
+
     def test_feature_vector_does_not_expose_mail_or_secret_values(self):
         raw_body = "password=fictional-secret token=fictional-token"
         sender = "private.user@example.test"
@@ -321,3 +386,61 @@ class PrivacyScannerTests(unittest.TestCase):
         ):
             self.assertNotIn(private_value, repr(manifest_result))
             self.assertNotIn(private_value, repr(candidate_result))
+
+    def test_detection_outcome_scanner_detects_private_structured_values_without_echo(self):
+        private_value = (
+            "private.user@example.test\n"
+            "https://portal.example.test/login?token=fictional "
+            "password=fictional C:\\Users\\Private\\model.onnx"
+        )
+        outcome = DetectionOutcome(
+            local_event_id="event-privacy-scan",
+            final_risk_score=20,
+            risk_level=RiskLevel.LOW,
+            generic_action=GenericAction.VERIFY_SENDER,
+            execution_state=DetectionExecutionState.RULES_ONLY,
+            structured_private_evidence=StructuredPrivateEvidence(
+                rule_evidence=(
+                    PrivateRuleEvidence(
+                        evidence_code=private_value,
+                        category=RuleCategory.OTHER,
+                        status="active",
+                        score_contribution=20,
+                        strong_evidence=False,
+                    ),
+                ),
+                rule_score=20,
+                model_adjustment=0,
+                risk_floor=0,
+                model_execution_status=None,
+                execution_state=DetectionExecutionState.RULES_ONLY,
+                degraded=False,
+                error_code=None,
+                assessment_schema_version=None,
+                model_version=None,
+                feature_schema_version=FEATURE_SCHEMA_VERSION,
+                detection_outcome_schema_version="2.0",
+            ),
+            minimal_plugin_projection=(
+                ("local_event_id", "event-privacy-scan"),
+                ("risk_level", "low"),
+                ("execution_state", "rules_only"),
+                ("generic_action", "verify_sender"),
+            ),
+            evidence_retention_until=datetime(2026, 8, 14, tzinfo=timezone.utc),
+        )
+
+        result = PrivacyScanner().scan_detection_outcome(outcome)
+
+        self.assertFalse(result.safe)
+        self.assertEqual(
+            result.violations,
+            (
+                "credential_assignment",
+                "email_address",
+                "line_break",
+                "private_path",
+                "url_query",
+            ),
+        )
+        self.assertNotIn(private_value, repr(result))

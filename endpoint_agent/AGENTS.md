@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**，以及开发期 **Phase 2：基线模型与评估**。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**，以及 **Phase 4A.1：本地规则评估与 Local Detection Service**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 和 Phase 5 保持 `pending`。
 
 现有生产包只包含：
 
@@ -29,10 +29,16 @@
 - Approved Training Corpus 的不可变候选、split policy、manifest、snapshot 类型和 `CorpusGovernance.prepare`；
 - 跨样本标签冲突拒绝、来源/时间 test 留出、版本化近重复分组和非敏感训练溯源；
 - `FeatureVector` 与 corpus manifest 的 `PrivacyScanner`。
+- 稳定的 `LocalInference.infer(FeatureVector, InferenceContext) -> ModelAssessment` seam 和无文件/网络副作用的 `UnavailableModelAdapter`；
+- 完整验证 Feature Schema 2.0 的 `LocalRuleEvaluator.evaluate(FeatureVector) -> tuple[RuleAssessment, ...]`，以及集中、保守、稳定的本地规则策略；
+- 固定执行 observation 验证、Feature Pipeline、本地规则和 Detection Kernel 的 `LocalDetectionService.detect(...) -> DetectionOutcome`；
+- 不可变的 `RuleAssessment`、模型输出校验、确定性风险融合和强证据风险下限；
+- `DetectionKernel.detect(...) -> DetectionOutcome`、规则模式/拒判/故障降级、私密证据投影和精确四字段插件投影；
+- `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`。
 
 独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
 
-现有测试覆盖包导入、领域类型、不可变约束、Feature Pipeline 资源边界、corpus 准入/跨样本标签/去重/近重复/source-time split、manifest 溯源、训练数据 split 泄漏、校准选择/拒判、三态评估、ONNX、隐私、离线能力和仓库卫生。当前仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、Detection Kernel、Native Messaging、数据库、加密存储或 UI；不得把少量合成实验指标或 `README.md` 的目标能力误认为已经交付。
+现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、插件字段白名单和 DetectionOutcome 隐私扫描。未来插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、Native Messaging、数据库、加密存储或 UI；不得把少量合成实验指标、Phase 4A/4A.1 interface 或 `README.md` 的目标能力误认为正式模型已经交付。
 
 ## 3. 目录边界
 
@@ -87,7 +93,7 @@
 
 不要一次写完全部测试再统一实现，也不要为了覆盖率提前实现后续阶段功能。
 
-阶段开发必须从 `DEVELOPMENT_PLAN.md` 中最早的未完成阶段开始。只有该阶段全部验收条件获得新鲜验证证据后，才能把对应状态改为 `complete`；不得修改后续阶段状态。
+阶段开发通常从 `DEVELOPMENT_PLAN.md` 中最早的可实施阶段开始。Phase 3 被明确暂缓时，Phase 5 可以依赖已完成的 Phase 4A.1 Local Detection Service seam 开发，但不能让浏览器提供可信风险判断，不能把 Phase 3 或 Phase 4B 标记为完成，也不能绕过正式 Endpoint Release 的模型和发布门禁。只有当前子阶段全部验收条件获得新鲜验证证据后，才能把对应状态改为 `complete`。
 
 ## 7. 离线与安全硬约束
 

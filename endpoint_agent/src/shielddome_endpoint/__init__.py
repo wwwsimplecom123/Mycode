@@ -22,11 +22,23 @@ from .domain import (
     DETECTION_OUTCOME_SCHEMA_VERSION,
     FEATURE_SCHEMA_VERSION,
     MAIL_OBSERVATION_SCHEMA_VERSION,
+    MODEL_ASSESSMENT_SCHEMA_VERSION,
+    DetectionExecutionState,
     DetectionOutcome,
     FeatureVector,
+    GenericAction,
     MailObservation,
     ModelAssessment,
+    ModelConfidenceState,
+    ModelExecutionStatus,
+    PrivateRuleEvidence,
+    RiskLevel,
+    RuleAssessment,
+    RuleCategory,
+    RuleSeverity,
+    StructuredPrivateEvidence,
 )
+from .detection_kernel import DetectionKernel
 from .feature_pipeline import (
     FEATURE_ATTACHMENT_MAX_ITEMS,
     FEATURE_AUTHENTICATION_MAX_ITEMS,
@@ -36,6 +48,13 @@ from .feature_pipeline import (
     TEXT_HASH_DIMENSION,
 )
 from .privacy import PrivacyScanResult, PrivacyScanner
+from .inference import (
+    InferenceContext,
+    LocalInference,
+    UnavailableModelAdapter,
+)
+from .local_detection import LocalDetectionService
+from .rule_evaluator import FeatureVectorValidationError, LocalRuleEvaluator
 
 
 __version__ = "0.1.0"
@@ -45,6 +64,7 @@ __all__ = [
     "MAIL_OBSERVATION_SCHEMA_VERSION",
     "FEATURE_SCHEMA_VERSION",
     "DETECTION_OUTCOME_SCHEMA_VERSION",
+    "MODEL_ASSESSMENT_SCHEMA_VERSION",
     "CORPUS_SCHEMA_VERSION",
     "CORPUS_MAX_CANDIDATES",
     "NEAR_DUPLICATE_FINGERPRINT_VERSION",
@@ -53,6 +73,23 @@ __all__ = [
     "FeatureVector",
     "ModelAssessment",
     "DetectionOutcome",
+    "ModelConfidenceState",
+    "ModelExecutionStatus",
+    "DetectionExecutionState",
+    "RiskLevel",
+    "GenericAction",
+    "RuleCategory",
+    "RuleSeverity",
+    "RuleAssessment",
+    "PrivateRuleEvidence",
+    "StructuredPrivateEvidence",
+    "InferenceContext",
+    "LocalInference",
+    "UnavailableModelAdapter",
+    "DetectionKernel",
+    "FeatureVectorValidationError",
+    "LocalRuleEvaluator",
+    "LocalDetectionService",
     "FeaturePipeline",
     "TEXT_HASH_DIMENSION",
     "FEATURE_TEXT_MAX_CHARACTERS",

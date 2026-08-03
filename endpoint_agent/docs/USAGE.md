@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库实现到开发期 **Phase 2：基线模型与评估**，提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**，以及 **Phase 4A.1：本地规则评估与端到端 Local Detection Service**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 和 Phase 5 保持 `pending`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -16,8 +16,15 @@
 - 合成数据 Logistic Regression、validation-only 校准候选质量门禁和不确定拒判；
 - test-only 分语言、来源和时间评估及 JSON/Markdown 报告；
 - 标准 ONNX 导出与 ONNX Runtime CPU 概率一致性验证。
+- 生产包中的稳定 `LocalInference` seam、明确推理预算和无副作用 `UnavailableModelAdapter`；
+- 不可变结构化 `RuleAssessment`、规则去重、强证据风险下限和有限模型调整；
+- `DetectionKernel.detect(...) -> DetectionOutcome` 唯一编排入口；
+- model success/uncertain/unavailable/timeout/error/invalid-output 和主动 rules-only 状态；
+- 精确四字段插件投影、内存私密证据投影和 DetectionOutcome 隐私扫描。
+- Feature Schema 2.0 完整边界验证、集中式本地规则策略和稳定不可变 `RuleAssessment` tuple；
+- 从 `MailObservation` 到 `DetectionOutcome` 的固定内存链路 `LocalDetectionService.detect(...)`。
 
-生产包 `shielddome_endpoint` 仍只负责 Phase 0–1 契约和特征/Corpus 治理。Phase 2 能力只存在于开发期训练目录，不会进入生产 Wheel。当前不会读取邮箱、解析 `.eml`、加载生产模型或输出最终风险，也不是可交付的终端检测程序。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理以及 Phase 4A/4A.1 本地检测链路。Phase 2 能力仍只存在于开发期训练目录，不会进入生产 Wheel。当前不会读取邮箱、解析 `.eml`、实现 Native Messaging、提供浏览器插件、加载生产模型、持久化结果或提供 UI；它能从调用方提供的 `MailObservation` 事实生成完整内存 `DetectionOutcome`，但还不是可交付的终端检测程序。
 
 ## 2. 环境要求
 
@@ -26,7 +33,7 @@
 - Git，可执行 `git check-ignore`；
 - 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-生产 Wheel 没有第三方运行时依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。本阶段不下载模型、数据集或 NLTK 资源。
+生产 Wheel 没有第三方运行时依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
 
 ## 3. 目录概览
 
@@ -46,6 +53,11 @@ endpoint_agent/
   src/shielddome_endpoint/
     __init__.py                     包版本与公开导出
     domain.py                       核心领域类型
+    inference.py                    Local Inference seam、预算和输出校验
+    risk_fusion.py                  确定性规则/模型风险融合
+    detection_kernel.py             DetectionOutcome 唯一编排入口
+    rule_evaluator.py               FeatureVector 验证与集中式本地规则
+    local_detection.py              observation 到 outcome 的可信检测 seam
     feature_pipeline.py             确定性特征转换
     corpus.py                       Corpus Governance 深模块
     privacy.py                      candidate/FeatureVector/manifest 隐私扫描
@@ -53,6 +65,9 @@ endpoint_agent/
     test_feature_pipeline.py        Feature Pipeline 公开行为
     test_corpus_governance.py       corpus 准入、去重和 split
     test_privacy.py                 隐私扫描
+    test_inference.py               unavailable 和 Model Assessment 校验
+    test_risk_fusion.py             规则/模型融合与强证据下限
+    test_detection_kernel.py        Kernel、降级和投影边界
     test_offline_constraints.py     离线边界
     test_repository_hygiene.py      Git 忽略规则
   training/shielddome_training/     Phase 2 独立训练侧深模块
@@ -115,7 +130,93 @@ vector = FeaturePipeline().transform(observation)
 
 当前 `FEATURE_SCHEMA_VERSION` 为 `2.0`。本版本记录了上述截断和饱和语义；修改特征名称、顺序、含义、Hashing 维度、规范化或资源边界时，必须显式升级版本并同步训练、测试和 manifest。
 
-## 5. Corpus Governance
+## 5. Local Detection Service
+
+未来 Native Messaging host 的唯一检测 seam：
+
+```python
+from datetime import datetime, timezone
+
+from shielddome_endpoint import LocalDetectionService
+
+
+outcome = LocalDetectionService().detect(
+    observation,
+    local_event_id="event-20260731-001",
+    observed_now=datetime(2026, 7, 31, tzinfo=timezone.utc),
+)
+```
+
+内部顺序固定为：
+
+```text
+MailObservation
+→ FeaturePipeline.transform
+→ LocalRuleEvaluator.evaluate
+→ DetectionKernel.detect
+→ DetectionOutcome
+```
+
+调用方不能传入 `RuleAssessment`、`score_contribution`、`strong_evidence`、`final_risk_score`、`risk_level`、`ModelAssessment`、`execution_state`、`generic_action`、retention deadline、用户角色/权限或本地事件 ID 的可信归属结论。Local Inference adapter 只能在 `LocalDetectionService` 构造时注入，默认是 `UnavailableModelAdapter`；因此没有正式模型时仍返回完整规则检测结果，并标记 `model_unavailable` / `model_not_configured`。Adapter 抛异常时返回同一规则结果并标记稳定模型错误，不回显异常内容。
+
+`LocalRuleEvaluator` 只接受完整兼容 Feature Schema 2.0 的 `FeatureVector`，拒绝字段缺失、未知、重复、NaN、Infinity、布尔数值和负数。规则只读取 Feature Pipeline 已有的有界结构化字段，不重新读取正文、URL 集合、附件集合或认证集合，也不检查附件内容。
+
+未来浏览器插件仅是 observation fact source。即使未来 payload 带有风险分数、规则、模型或权限字段，Phase 5 的 Native Messaging intake 也必须拒绝或忽略；Phase 4A.1 只建立和测试 Service interface，没有实现协议解析、host 或插件。
+
+## 6. Detection Kernel
+
+稳定入口：
+
+```python
+from datetime import datetime, timezone
+
+from shielddome_endpoint import (
+    DetectionKernel,
+    GenericAction,
+    InferenceContext,
+    RuleAssessment,
+    RuleCategory,
+    RuleSeverity,
+    UnavailableModelAdapter,
+)
+
+
+outcome = DetectionKernel(UnavailableModelAdapter()).detect(
+    vector,
+    (
+        RuleAssessment(
+            rule_id="dmarc_deterministic_failure",
+            category=RuleCategory.AUTHENTICATION,
+            severity=RuleSeverity.HIGH,
+            score_contribution=45,
+            strong_evidence=True,
+            evidence_code="dmarc_failure",
+            generic_action=GenericAction.CONTACT_SECURITY,
+        ),
+    ),
+    local_event_id="event-20260730-001",
+    detected_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+    inference_context=InferenceContext(max_duration_ms=3_000),
+)
+```
+
+调用方负责提供已经形成的 `FeatureVector`、结构化规则评估、本地事件 ID、带时区检测时间和 1–60,000 ms 的明确推理预算。Kernel 不解析邮件、不生成规则、不加载模型、不读写文件，也不访问数据库或网络。
+
+`UnavailableModelAdapter` 返回 `unavailable`，不伪造 probability、confidence state、model version 或 Feature Schema。未注入 adapter 时状态为 `rules_only`；adapter 返回拒判、unavailable、timeout、error、非法输出或抛异常时，Kernel 都保留纯规则结果，并使用稳定执行状态与非敏感错误码说明降级。
+
+风险融合固定为：
+
+- 相同 rule ID 只计分一次，并按与输入顺序无关的保守顺序选择；
+- strong low/medium/high/critical 分别建立 20/40/70/90 风险下限；
+- confident phishing 最多增加 25 分，confident benign 最多减少 5 分且不能低于强规则下限；
+- uncertain 和全部故障/规则模式不产生模型调整；无规则的 uncertain 仍给出 `verify_sender`，不投影为安全放行；
+- 最终分数限制为 0–100，0–24/25–49/50–79/80–100 分别映射 low/medium/high/critical。
+
+`minimal_plugin_projection` 的允许字段精确为 `local_event_id`、`risk_level`、`execution_state` 和 `generic_action`。`structured_private_evidence` 只包含稳定 evidence code/类别/状态、分数组成、执行/降级状态和版本摘要；两者都不包含正文、完整地址、URL query、Token、密码或私有路径。本阶段结果只存在于内存，不落盘。
+
+`MODEL_ASSESSMENT_SCHEMA_VERSION` 为 `1.0`，`DETECTION_OUTCOME_SCHEMA_VERSION` 为 `2.0`；Feature Schema 继续为 `2.0`，Corpus Schema 继续为 `3.0`。
+
+## 7. Corpus Governance
 
 稳定入口：
 
@@ -229,7 +330,7 @@ snapshot = CorpusGovernance().prepare((candidate,), split_policy=policy)
 
 `CorpusSnapshot` 只是内存领域结果。本阶段不提供文件导入、snapshot 持久化、数据加载器或训练入口。
 
-## 6. 隐私扫描
+## 8. 隐私扫描
 
 ```python
 from shielddome_endpoint import PrivacyScanner
@@ -239,6 +340,8 @@ scanner = PrivacyScanner()
 candidate_result = scanner.scan_candidate(candidate)
 feature_result = scanner.scan_feature_vector(vector)
 manifest_result = scanner.scan_manifest(snapshot.manifest)
+outcome_result = scanner.scan_detection_outcome(outcome)
+rule_result = scanner.scan_rule_assessments(rules)
 ```
 
 扫描结果只包含 `safe` 和稳定违规代码，不回显命中内容。可在测试或调用边界通过 `forbidden_values` 传入不得出现的原文、地址或完整 URL，确认其未进入输出。
@@ -254,7 +357,7 @@ manifest_result = scanner.scan_manifest(snapshot.manifest)
 
 所有 violation code 都排序并去重；结果不会包含命中原值、内容片段或身份信息。隐私扫描是结构化输出的防回归门禁，不替代候选数据的人工脱敏和审核，也不是邮件脱敏器。
 
-## 7. 测试与包导入
+## 9. 测试与包导入
 
 在仓库根目录运行完整 Endpoint Agent 测试：
 
@@ -262,7 +365,7 @@ manifest_result = scanner.scan_manifest(snapshot.manifest)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前完整 Endpoint Agent 回归应发现 58 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
+当前完整 Endpoint Agent 回归应发现 115 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
 
 运行 Phase 1 单个测试模块：
 
@@ -285,10 +388,10 @@ python -m unittest discover -s endpoint_agent/tests -p "test_privacy.py" -v
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path endpoint_agent\src).Path
-python -c "import shielddome_endpoint as s; print(s.__version__, s.FEATURE_SCHEMA_VERSION, s.CORPUS_SCHEMA_VERSION)"
+python -c "import shielddome_endpoint as s; print(s.__version__, s.FEATURE_SCHEMA_VERSION, s.CORPUS_SCHEMA_VERSION, s.DETECTION_OUTCOME_SCHEMA_VERSION)"
 ```
 
-## 8. 离线构建 Wheel
+## 10. 离线构建 Wheel
 
 ```powershell
 python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
@@ -304,7 +407,7 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 
 `dist/` 属于可再生成且已忽略的本地产物。
 
-## 9. 数据和离线边界
+## 11. 数据和离线边界
 
 以下内容必须保留在 Git 之外：
 
@@ -322,27 +425,29 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 - 不调用中心后台、外部模型、信誉服务、遥测或更新服务；
 - 不下载、打开、解压、预览或执行附件。
 
-## 10. 尚未实现
+## 12. 尚未实现
 
-Phase 2 明确不包含：
+Phase 4A.1 明确不包含：
 
 - Approved Training Corpus、正式模型训练或生产模型；
 - Phase 3 文本编码器、微调、量化或最低硬件发布评测；
-- 生产 ONNX Runtime adapter、模型加载或端点推理；
-- Detection Kernel、风险融合或 DetectionOutcome 生成；
+- Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
+- Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - Native Messaging、浏览器插件或本地网络服务；
 - 数据库、DPAPI、AES-GCM、15 天留存；
 - 托盘、控制台、`.eml` 或邮件客户端 adapter。
 
-计划中的下一阶段是 **Phase 3：文本编码模型**，但当前受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞。在该前置条件落实前不能开始正式模型选择，也不能产生可发布 Unified Model Release；不得从本使用文档或合成指标推断 Phase 3 能力已经存在。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。下一步是依赖 Phase 4A.1 的可信本地检测 seam 实施仍为 `pending` 的 Phase 5；这不代表绕过模型合规要求。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-## 11. 修改后的最低验证
+## 13. 修改后的最低验证
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
+python -m unittest discover -s endpoint_agent/tests -p "test_inference.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_risk_fusion.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_detection_kernel.py" -v
 .\endpoint_agent\.venv-training\Scripts\python.exe -m unittest discover -s endpoint_agent/training_tests -v
-.\endpoint_agent\.venv-training\Scripts\python.exe endpoint_agent\training\run_synthetic_experiment.py --artifact-directory endpoint_agent\training\artifacts\acceptance
-python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase4a
 git status --short
 git diff --stat
 git diff -- endpoint_agent

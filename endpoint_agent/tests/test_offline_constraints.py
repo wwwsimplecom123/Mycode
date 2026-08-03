@@ -7,6 +7,33 @@ ENDPOINT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class OfflineConstraintTests(unittest.TestCase):
+    def test_guard_rejects_model_runtime_import_and_listener_calls(self):
+        from _offline_guard import scan_offline_violations
+
+        with TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            source_root = temporary_path / "src"
+            source_root.mkdir()
+            (source_root / "forbidden.py").write_text(
+                "import onnxruntime\nlistener.bind(('127.0.0.1', 1))\nlistener.listen()\n",
+                encoding="utf-8",
+            )
+            pyproject_path = temporary_path / "pyproject.toml"
+            pyproject_path.write_text(
+                '[project]\nname = "guard-fixture"\nversion = "0"\ndependencies = []\n',
+                encoding="utf-8",
+            )
+
+            violations = scan_offline_violations(
+                source_root,
+                pyproject_path,
+                additional_forbidden_import_roots=("onnxruntime",),
+            )
+
+            self.assertTrue(any("onnxruntime" in item for item in violations))
+            self.assertTrue(any("listener call bind" in item for item in violations))
+            self.assertTrue(any("listener call listen" in item for item in violations))
+
     def test_guard_rejects_forbidden_network_import(self):
         from _offline_guard import scan_offline_violations
 
@@ -76,6 +103,7 @@ class OfflineConstraintTests(unittest.TestCase):
         violations = scan_offline_violations(
             ENDPOINT_ROOT / "src" / "shielddome_endpoint",
             ENDPOINT_ROOT / "pyproject.toml",
+            additional_forbidden_import_roots=("onnxruntime",),
         )
 
         self.assertEqual(violations, ())

@@ -146,7 +146,7 @@ endpoint_agent/DEVELOPMENT_PLAN.md，严格保持现有 ShieldDome 代码不变�
 - Detection Kernel 是顶层 deep module。
 - 插件、EML 导入和未来邮件客户端只依赖一个检测 interface。
 - Feature Pipeline 是训练与终端推理共同的 seam。
-- ONNX Runtime adapter 和 deterministic fake adapter 共同证明 Local Inference seam 是真实的。
+- Phase 4A 的 `UnavailableModelAdapter` 与测试目录中的 deterministic fake adapter 共同证明 Local Inference seam 是真实的；生产 ONNX Runtime adapter 只在 Phase 4B 接入正式 Unified Model Release 时实现。
 - 存储加密、保留期和清理顺序隐藏在 Local Evidence Store implementation 内。
 - 不为尚未存在的隔离附件扫描器提前创建空 adapter。
 
@@ -429,6 +429,8 @@ Status: complete
 
 Status: pending
 
+本阶段因 Approved Training Corpus 尚不存在而被有意暂缓，不是已经完成，也不能用 Phase 2 合成 ONNX 或 Phase 4A 的模型接口替代。正式模型选择、训练、量化、发布指标和最低硬件验证仍全部属于本阶段及其发布门禁。
+
 - 建立候选模型许可证和来源清单。
 - 在固定 corpus snapshot 上基准测试。
 - 评估冻结向量和必要时的微调方案。
@@ -439,14 +441,45 @@ Status: pending
 
 ### Phase 4：Detection Kernel 与风险融合
 
+Status: in_progress
+
+#### Phase 4A：模型无关 Detection Kernel
+
+Status: complete
+
+- 已实现稳定 `LocalInference` seam、明确推理预算、生产可用的 `UnavailableModelAdapter` 和仅位于测试目录的 fake adapter。
+- 已实现不可变 `RuleAssessment`、确定性去重、强证据风险下限、有限模型加减分和集中式 0–100 风险映射。
+- 已实现 `DetectionKernel.detect(...)` 作为完整检测结果的唯一编排入口，覆盖拒判、模型不可用、超时、错误、adapter 异常、非法输出和主动纯规则模式。
+- 已实现只含四个允许字段的插件投影，以及不含邮件原文、完整地址、URL query、Token、密码和私有路径的内存私密证据投影。
+- 已实现 Model Assessment schema/概率/状态/模型版本/Feature Schema/耗时/error code 校验；非法输出安全降级，不阻断规则结果。
+- `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`；`FEATURE_SCHEMA_VERSION = "2.0"` 与 `CORPUS_SCHEMA_VERSION = "3.0"` 保持不变。
+- Phase 4A 没有生产模型，因此只通过测试 fake 模拟耗时、超时和异常；没有声称完成真实 3 秒推理验证。
+
+#### Phase 4A.1：本地规则评估与端到端 Local Detection Service
+
+Status: complete
+
+- 已实现只消费完整兼容 Feature Schema 2.0 `FeatureVector` 的 `LocalRuleEvaluator`，在公开 seam 拒绝 schema 不兼容、字段缺失/未知/重复、非有限值、布尔数值和非法负数。
+- 已实现认证、发件人/Reply-To、链接结构、附件元数据和组合意图的最小本地规则策略；分数、严重度、强证据、证据码和通用动作集中定义且顺序稳定。
+- 危险附件扩展、IP 字面量链接与凭据组合、多项认证失败与仿冒组合形成强证据；单一普通意图词、认证缺失、发件人不一致和国际化域名单独不形成强证据。
+- 已实现 `LocalDetectionService.detect(MailObservation, *, local_event_id, observed_now) -> DetectionOutcome`，内部固定执行 observation 验证、Feature Pipeline、本地规则评估和 Detection Kernel。
+- Local Inference adapter 只能在 Service 构造时注入，默认 `UnavailableModelAdapter`；模型不可用或 adapter 异常仍返回完整规则结果与稳定降级状态。
+- 已验证规则和最终结果不包含主题、正文、地址、完整 URL/query、附件名、Token、密码或私有路径；RuleEvaluator 只处理 Feature Pipeline 的有界输出。
+- Phase 4A.1 是 Phase 5 的安全前置条件：未来插件只提交邮件观察事实，不得提交规则、分数、强证据、模型结果、执行状态、动作、留存、角色/权限或事件所有权结论。
+- 本阶段没有实现 Native Messaging、浏览器插件、数据库、UI、模型训练或生产模型 adapter。
+
+#### Phase 4B：正式 ONNX Runtime 与 Unified Model Release 接入
+
 Status: pending
 
-- 实现 Local Inference seam 及 ONNX/fake adapters。
-- 实现规则、Model Assessment 和相似样本融合。
-- 实现拒判、超时、损坏和规则模式降级。
-- 实现最小插件投影与私密证据投影。
+- 依赖 Phase 3 产生满足许可、质量、资源和发布门禁的正式 Unified Model Release。
+- 实现生产 ONNX Runtime CPU adapter、模型加载、真实执行超时/资源控制和兼容性验证。
+- 在最低支持硬件上验证真实模型推理低于 3 秒，并完成损坏、不兼容和资源不足降级验证。
+- 不得把 Phase 2 合成 ONNX、测试 fake 或 `UnavailableModelAdapter` 解释为正式模型接入。
 
-完成条件：测试只通过 Detection Kernel interface 覆盖完整风险结果。
+Phase 4 总完成条件：Phase 4A、Phase 4A.1 与 Phase 4B 均完成，测试通过本地检测 interface 覆盖完整风险结果，并取得正式模型与硬件验证证据。Phase 4A.1 完成后 Phase 4 总状态保持 `in_progress`。
+
+Phase 5–7 的系统框架可依赖稳定的 Phase 4A interface 继续开发，不必伪造 Phase 3 已完成；正式 Endpoint Release 仍受 Phase 3、Phase 4B 和全部发布门禁约束。Confirmed Example Library 的持久化和相似样本有限校准仍属于 Phase 6，不在 Phase 4A 中实现。
 
 ### Phase 5：Native Messaging 与新浏览器插件
 
@@ -556,8 +589,10 @@ Status: pending
 - 不截获邮件协议或用户凭据。
 - 不把插件最小结果等同于删除内部证据。
 - 不因模型指标优秀而绕过确定性规则。
-- 不在 Phase 0-4 完成前优先制作复杂 UI。
+- 不在 Phase 4A 的稳定 Detection Kernel interface 完成前优先制作复杂 UI。
 
 ## 14. 下一步
 
-计划中的下一阶段是 **Phase 3：文本编码模型**，但开始前必须先获得真实、许可明确、人工审核且完成去重/泄漏隔离的 Approved Training Corpus。该数据前置条件未满足时，Phase 3 保持 `pending`，不得用 Phase 2 合成 fixture 选择正式文本编码模型。一次只完成一个阶段；阶段完成后运行相关测试、更新本文件的 Status，并检查 `git diff` 确保现有目录没有被修改。
+Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔离的 Approved Training Corpus 而有意暂缓，继续保持 `pending`；不得用 Phase 2 合成 fixture 选择正式文本编码模型。Phase 4A 已完成，Phase 4 总状态为 `in_progress`，Phase 4B 继续等待 Phase 3 的正式模型。
+
+下一步是基于 Phase 4A.1 的可信本地检测 seam 实施 **Phase 5：Native Messaging 与新浏览器插件**。Phase 5 当前仍为 `pending`，本次没有提前实现其协议、host 或插件。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。

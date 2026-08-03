@@ -513,15 +513,43 @@ Phase 5 总完成条件：Phase 5A 与 Phase 5B 均完成，真实浏览器邮�
 
 ### Phase 6：加密存储、样本库和留存
 
+Status: in_progress
+
+#### Phase 6A：加密证据存储、15 天留存、全部删除
+
+Status: complete
+
+- 已实现严格、不可变、版本化的 Endpoint Evidence Record，只投影事件 ID、UTC 时间、风险等级、检测状态、通用动作、来源类型、规则代码摘要、拒判、模型执行、降级和稳定错误码。
+- 已实现 `%LOCALAPPDATA%\ShieldDome\EndpointAgent` 当前用户目录边界；显式拒绝系统共享目录和位于当前用户 `LOCALAPPDATA` 之外的数据目录。
+- 已使用 Windows `CryptProtectData`/`CryptUnprotectData` 当前用户范围保护随机 256 位数据密钥；固定 `CRYPTPROTECT_UI_FORBIDDEN` 且不设置 `CRYPTPROTECT_LOCAL_MACHINE`，并用当前用户 SID 摘要拒绝跨用户作用域保护包。
+- 已使用成熟的 `cryptography==49.0.0` `AESGCM` 为每条记录生成独立 96 位 nonce，以 AES-256-GCM 加密规范 JSON，并把 SQLite 明文索引字段绑定为 associated data。
+- SQLite 只保存事件 ID、检测/过期 UTC 索引、schema、nonce、密文和认证标签；不保存主题、正文、完整地址、URL、附件名/内容或原始邮件。
+- 已实现按事件读取、稳定分页、未知 schema 拒绝、篡改/错误密钥安全失败、精确 `expires_at <= now` 的 15 天清理和 Native Host 每次检测时的自动清理触发。
+- 已实现 SQLite `secure_delete`、WAL checkpoint/truncate、VACUUM、已知 WAL/SHM/journal/temp 文件覆写删除，以及删除 DPAPI 保护密钥的密码学销毁；全部删除幂等。
+- Native Host 在检测完成后尽力保存证据；存储初始化、清理、投影或写入失败都不改变四字段检测结果，也不向协议 stdout 输出异常文本或存储材料。
+- Windows 当前用户真实 DPAPI、用户作用域、AES-GCM 随机化/篡改、数据库原文搜索、15 天边界、全部删除、连续事件隔离、离线约束和完整 Endpoint Agent 回归均已有自动化测试。
+- 生产运行依赖固定为 `cryptography==49.0.0`；构建与部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖，Agent 运行时不下载依赖。
+
+#### Phase 6B：Confirmed Example Library 与有限校准
+
 Status: pending
 
-- DPAPI 保护数据密钥。
-- AES-GCM 保存 Endpoint Evidence Record。
-- 实现 15 天清理、全部删除和卸载策略。
-- 实现 Confirmed Example Library 和有限校准。
-- 实现脱敏诊断包导出。
+- 实现每用户 Confirmed Example Library。
+- 只保存脱敏特征、向量、人工标签、来源摘要和内容哈希。
+- 实现不能抵消强规则证据的有限相似样本校准。
 
-完成条件：原文不落盘，越权 Windows 用户不能读取本地记录，清理测试通过。
+本阶段未在 Phase 6A 中实现。
+
+#### Phase 6C：脱敏诊断包导出
+
+Status: pending
+
+- 仅在用户明确操作时导出一次性脱敏诊断包。
+- 诊断包不得包含邮件原文、密钥、nonce、密文、认证标签或私有路径。
+
+本阶段未在 Phase 6A 中实现。
+
+Phase 6 总完成条件：Phase 6A、Phase 6B 与 Phase 6C 全部完成，原文不落盘，越权 Windows 用户不能读取本地记录，清理、有限校准和诊断导出隐私测试全部通过。Phase 6A 完成后 Phase 6 总状态保持 `in_progress`。
 
 ### Phase 7：托盘、个人控制台和数据看板
 
@@ -614,3 +642,5 @@ Status: pending
 Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔离的 Approved Training Corpus 而有意暂缓，继续保持 `pending`；不得用 Phase 2 合成 fixture 选择正式文本编码模型。Phase 4A 已完成，Phase 4 总状态为 `in_progress`，Phase 4B 继续等待 Phase 3 的正式模型。
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+
+Phase 6 已保守拆分为 6A、6B 和 6C。Phase 6A 已完成当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6 总状态保持 `in_progress`。Confirmed Example Library/有限校准仍属于 Phase 6B，脱敏诊断包仍属于 Phase 6C，两者均为 `pending`，不得把 Phase 6A 的证据存储解释为已经实现后续能力。

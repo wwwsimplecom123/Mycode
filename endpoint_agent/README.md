@@ -4,9 +4,9 @@ This directory contains the design and, later, the implementation of the standal
 
 ## Current Implementation Status
 
-Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`.
+Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 is `in_progress`: Phase 6A encrypted evidence storage is complete, while Phase 6B Confirmed Example Library/calibration and Phase 6C sanitized diagnostics export remain pending.
 
-The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only. With no model adapter, detection still returns the deterministic rule result. Phase 5B now supplies a public-key-derived stable development extension ID, a pinned development-only PyInstaller build command, SHA-256 build metadata, and safe current-user Chrome/Edge install/check/uninstall scripts. This environment has no offline PyInstaller, so no Host executable was built, no default browser registration was written, and real Chrome/Edge acceptance remains outstanding. There is still no production ONNX Runtime adapter or formal model in this repository.
+The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. Phase 6A adds a strict Endpoint Evidence Record, current-user `%LOCALAPPDATA%` storage, a random DPAPI-protected data key, per-record AES-256-GCM, minimal SQLite indexes, fifteen-day cleanup, and explicit all-data deletion. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only. With no model adapter, detection still returns the deterministic rule result, and evidence storage failure does not block that result. Phase 5B now supplies a public-key-derived stable development extension ID, a pinned development-only PyInstaller build command, SHA-256 build metadata, and safe current-user Chrome/Edge install/check/uninstall scripts. This environment has no offline PyInstaller, so no Host executable was built, no default browser registration was written, and real Chrome/Edge acceptance remains outstanding. There is still no production ONNX Runtime adapter or formal model in this repository.
 
 ## Product Definition
 
@@ -135,13 +135,17 @@ Risk Fusion combines deterministic evidence, Model Assessment, and bounded simil
 
 ### Local Evidence Store
 
-- Per-user storage under `%LOCALAPPDATA%`.
-- Encryption key protected with Windows DPAPI.
-- AES-GCM encrypted structured records.
-- No original `.eml`, full body, attachment content, credentials, tokens, or full recipient lists.
-- Automatic deletion after 15 days.
-- No network upload.
-- Explicit user action is required to export a sanitized diagnostic package.
+- Per-user storage is fixed under `%LOCALAPPDATA%\ShieldDome\EndpointAgent`; shared and out-of-profile directories are rejected.
+- One random 256-bit data key is protected with current-user Windows DPAPI, never LocalMachine scope.
+- Every structured record uses AES-256-GCM with a fresh 96-bit nonce and authenticated plaintext indexes.
+- SQLite contains only event/time/schema indexes plus nonce, ciphertext, and authentication tag.
+- Records contain no original `.eml`, subject, full body, full address, URL, attachment name/content, credentials, tokens, or recipient list.
+- `cleanup_expired` deletes records exactly when `expires_at <= now`; Native Host triggers cleanup on detection.
+- Explicit all-data deletion applies SQLite secure deletion, truncates/removes owned sidecars and temporary files, and deletes the protected data key.
+- Tampering, damaged keys, incompatible schema, and decryption failures return no partial record.
+- Storage never uploads data and storage failure never blocks the detection projection.
+- `cryptography==49.0.0` and its transitive runtime wheels must be supplied from an approved offline build cache; the Agent never downloads them.
+- Sanitized diagnostic export remains unimplemented Phase 6C work.
 
 ### Confirmed Example Library
 

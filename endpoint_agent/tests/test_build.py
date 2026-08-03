@@ -49,6 +49,10 @@ class WheelBuildTests(unittest.TestCase):
                     "shielddome_endpoint/__init__.py",
                     "shielddome_endpoint/domain.py",
                     "shielddome_endpoint/detection_kernel.py",
+                    "shielddome_endpoint/evidence_crypto.py",
+                    "shielddome_endpoint/evidence_record.py",
+                    "shielddome_endpoint/evidence_store.py",
+                    "shielddome_endpoint/key_protection.py",
                     "shielddome_endpoint/feature_pipeline.py",
                     "shielddome_endpoint/inference.py",
                     "shielddome_endpoint/native_host.py",
@@ -78,5 +82,5 @@ class WheelBuildTests(unittest.TestCase):
             self.assertIn("Name: shielddome-endpoint", metadata)
             self.assertIn("Version: 0.1.0", metadata)
             self.assertIn("Requires-Python: >=3.12", metadata)
-            self.assertNotIn("Requires-Dist:", metadata)
+            self.assertIn("Requires-Dist: cryptography==49.0.0", metadata)
             self.assertNotIn("PyInstaller", metadata)

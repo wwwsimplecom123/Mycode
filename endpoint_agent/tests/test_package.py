@@ -153,3 +153,23 @@ class PackageImportTests(unittest.TestCase):
 
         self.assertIsNotNone(NativeHostHandler)
         self.assertIsNotNone(run_native_host)
+
+    def test_package_reexports_phase_six_a_evidence_seams(self):
+        from shielddome_endpoint import (
+            EVIDENCE_RECORD_SCHEMA_VERSION,
+            CurrentUserKeyProtector,
+            EndpointEvidenceRecord,
+            EvidenceCipher,
+            EvidenceStore,
+            UserDataKeyManager,
+        )
+
+        self.assertEqual(EVIDENCE_RECORD_SCHEMA_VERSION, "1.0")
+        for public_type in (
+            CurrentUserKeyProtector,
+            EndpointEvidenceRecord,
+            EvidenceCipher,
+            EvidenceStore,
+            UserDataKeyManager,
+        ):
+            self.assertIsNotNone(public_type)

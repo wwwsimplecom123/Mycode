@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**，以及 **Phase 6A：加密证据存储、15 天留存与全部删除**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`；Phase 6 总状态为 `in_progress`，Phase 6B 与 Phase 6C 均保持 `pending`。
 
 现有生产包只包含：
 
@@ -39,11 +39,15 @@
 - 位于 `endpoint_agent/extension/`、仅匹配 chinaccs Webmail、只用 Native Messaging 的独立 MV3 插件；
 - 由公开 manifest key 固定的开发扩展 ID、PyInstaller Host 构建配置、当前用户 Chrome/Edge manifest 与注册生命周期脚本；
 - 源码 Host 子进程协议/隐私/零 TCP/UDP socket 测试，以及独立测试注册表路径下的安装、检查、幂等与自有项卸载测试；
+- 严格、不可变、版本化的 Endpoint Evidence Record，只包含批准的结构化检测字段；
+- `%LOCALAPPDATA%\ShieldDome\EndpointAgent` 每用户目录、Windows 当前用户 DPAPI 保护的随机 256 位数据密钥，以及跨用户作用域拒绝；
+- 使用 `cryptography==49.0.0` AESGCM 的逐记录 AES-256-GCM、最小 SQLite 索引、按事件/分页读取、15 天边界清理与全部删除；
+- 密文/标签/密钥/schema 损坏安全失败、SQLite 原文缺失、连续检测隔离，以及存储失败不阻断 Native Host 检测结果；
 - `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`。
 
 独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
 
-现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束和 DetectionOutcome 隐私扫描。插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收、数据库、加密存储或桌面 UI；Phase 5B 的构建与注册配置不等于 `.exe` 或浏览器验收已经完成。不得把少量合成实验指标、Phase 4A/4A.1 interface 或 `README.md` 的目标能力误认为正式模型已经交付。
+现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束、DetectionOutcome 隐私扫描，以及 Phase 6A 的真实当前用户 DPAPI、AES-GCM、SQLite 隐私、15 天边界与删除。插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收、Confirmed Example Library、诊断包导出或桌面 UI；Phase 5B 的构建与注册配置不等于 `.exe` 或浏览器验收已经完成。不得把少量合成实验指标、Phase 4A/4A.1 interface、Phase 6A 证据存储或 `README.md` 的目标能力误认为正式模型、Phase 6B/6C 或桌面产品已经交付。
 
 ## 3. 目录边界
 
@@ -81,6 +85,7 @@
 - 生产代码放在 `endpoint_agent/src/shielddome_endpoint/`。
 - 测试放在 `endpoint_agent/tests/`。
 - wheel 构建使用项目内置的零外部依赖 PEP 517 后端；没有明确授权和离线复现证据时，不得重新引入第三方 build backend requirement。
+- Phase 6A 唯一新增生产运行依赖为固定 `cryptography==49.0.0`；它不是 build backend requirement，必须由批准的离线缓存随 Endpoint Release 构建环境提供，禁止在 Agent 运行时下载。
 - 领域数据优先使用明确类型和不可变结构，不用松散字典替代稳定公共契约。
 - 每个文件保持单一职责；业务逻辑不要堆积在包入口或未来 UI 中。
 - 不为了未来阶段创建空 service、adapter、database、model 或 UI 占位实现。

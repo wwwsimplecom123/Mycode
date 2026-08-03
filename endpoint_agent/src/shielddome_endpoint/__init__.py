@@ -39,6 +39,17 @@ from .domain import (
     StructuredPrivateEvidence,
 )
 from .detection_kernel import DetectionKernel
+from .evidence_crypto import (
+    EncryptedEvidence,
+    EvidenceCipher,
+    EvidenceCryptoError,
+)
+from .evidence_record import (
+    EVIDENCE_RECORD_SCHEMA_VERSION,
+    EndpointEvidenceRecord,
+    EvidenceRecordValidationError,
+)
+from .evidence_store import EvidenceStore, EvidenceStoreError
 from .feature_pipeline import (
     FEATURE_ATTACHMENT_MAX_ITEMS,
     FEATURE_AUTHENTICATION_MAX_ITEMS,
@@ -54,6 +65,12 @@ from .inference import (
     UnavailableModelAdapter,
 )
 from .local_detection import LocalDetectionService
+from .key_protection import (
+    CurrentUserKeyProtector,
+    KeyProtectionError,
+    UserDataKeyManager,
+    default_user_data_directory,
+)
 from .native_host import NativeHostHandler, run_native_host
 from .rule_evaluator import FeatureVectorValidationError, LocalRuleEvaluator
 
@@ -66,6 +83,7 @@ __all__ = [
     "FEATURE_SCHEMA_VERSION",
     "DETECTION_OUTCOME_SCHEMA_VERSION",
     "MODEL_ASSESSMENT_SCHEMA_VERSION",
+    "EVIDENCE_RECORD_SCHEMA_VERSION",
     "CORPUS_SCHEMA_VERSION",
     "CORPUS_MAX_CANDIDATES",
     "NEAR_DUPLICATE_FINGERPRINT_VERSION",
@@ -74,6 +92,7 @@ __all__ = [
     "FeatureVector",
     "ModelAssessment",
     "DetectionOutcome",
+    "EndpointEvidenceRecord",
     "ModelConfidenceState",
     "ModelExecutionStatus",
     "DetectionExecutionState",
@@ -88,6 +107,16 @@ __all__ = [
     "LocalInference",
     "UnavailableModelAdapter",
     "DetectionKernel",
+    "EncryptedEvidence",
+    "EvidenceCipher",
+    "EvidenceCryptoError",
+    "EvidenceRecordValidationError",
+    "EvidenceStore",
+    "EvidenceStoreError",
+    "CurrentUserKeyProtector",
+    "KeyProtectionError",
+    "UserDataKeyManager",
+    "default_user_data_directory",
     "FeatureVectorValidationError",
     "LocalRuleEvaluator",
     "LocalDetectionService",

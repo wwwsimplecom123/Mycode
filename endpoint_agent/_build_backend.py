@@ -14,13 +14,14 @@ PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
-def _project_metadata() -> tuple[str, str, str]:
+def _project_metadata() -> tuple[str, str, str, tuple[str, ...]]:
     configuration = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     project = configuration["project"]
     return (
         str(project["name"]),
         str(project["version"]),
         str(project["requires-python"]),
+        tuple(str(item) for item in project.get("dependencies", ())),
     )
 
 
@@ -29,14 +30,18 @@ def _distribution_name(project_name: str) -> str:
 
 
 def _metadata_files() -> tuple[str, dict[str, bytes]]:
-    project_name, version, requires_python = _project_metadata()
+    project_name, version, requires_python, dependencies = _project_metadata()
     distribution_name = _distribution_name(project_name)
     dist_info = f"{distribution_name}-{version}.dist-info"
+    dependency_metadata = "".join(
+        f"Requires-Dist: {dependency}\n" for dependency in dependencies
+    )
     metadata = (
         "Metadata-Version: 2.1\n"
         f"Name: {project_name}\n"
         f"Version: {version}\n"
         f"Requires-Python: {requires_python}\n"
+        f"{dependency_metadata}"
         "\n"
     ).encode("utf-8")
     wheel = (
@@ -103,7 +108,7 @@ def build_wheel(
     config_settings=None,
     metadata_directory=None,
 ) -> str:
-    project_name, version, _ = _project_metadata()
+    project_name, version, _, _ = _project_metadata()
     distribution_name = _distribution_name(project_name)
     wheel_filename = f"{distribution_name}-{version}-py3-none-any.whl"
     wheel_path = Path(wheel_directory) / wheel_filename

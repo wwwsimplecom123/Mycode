@@ -4,6 +4,7 @@ import sys
 from typing import BinaryIO
 import uuid
 
+from .evidence_record import EndpointEvidenceRecord
 from .local_detection import LocalDetectionService
 from .native_payload import DetectMailRequest, PingRequest, parse_native_request, to_mail_observation
 from .native_protocol import (
@@ -21,6 +22,12 @@ DEVELOPMENT_EXTENSION_ORIGIN = (
 )
 
 
+def _create_default_evidence_store():
+    from .evidence_store import EvidenceStore
+
+    return EvidenceStore()
+
+
 class NativeHostHandler:
     def __init__(
         self,
@@ -29,6 +36,7 @@ class NativeHostHandler:
         detection_service: LocalDetectionService | None = None,
         clock: Callable[[], datetime] | None = None,
         event_id_factory: Callable[[], str] | None = None,
+        evidence_store_factory: Callable[[], object] | None = None,
     ) -> None:
         self._extension_origin = extension_origin
         self._detection_service = detection_service or LocalDetectionService()
@@ -36,6 +44,10 @@ class NativeHostHandler:
         self._event_id_factory = event_id_factory or (
             lambda: f"event-{uuid.uuid4()}"
         )
+        self._evidence_store_factory = (
+            evidence_store_factory or _create_default_evidence_store
+        )
+        self._evidence_store = None
 
     def __call__(self, message: dict[str, object]) -> dict[str, object]:
         if self._extension_origin != DEVELOPMENT_EXTENSION_ORIGIN:
@@ -51,6 +63,26 @@ class NativeHostHandler:
                 local_event_id=self._event_id_factory(),
                 observed_now=observed_at,
             )
+            if self._evidence_store is None:
+                try:
+                    self._evidence_store = self._evidence_store_factory()
+                except Exception:
+                    self._evidence_store = None
+            if self._evidence_store is not None:
+                try:
+                    self._evidence_store.cleanup_expired(now=observed_at)
+                except Exception:
+                    pass
+            try:
+                record = EndpointEvidenceRecord.from_detection_outcome(
+                    outcome,
+                    detected_at=observed_at,
+                    source_kind=observation.source_kind,
+                )
+                if self._evidence_store is not None:
+                    self._evidence_store.put(record)
+            except Exception:
+                pass
             return dict(outcome.minimal_plugin_projection)
         raise NativeProtocolError("invalid_message")
 

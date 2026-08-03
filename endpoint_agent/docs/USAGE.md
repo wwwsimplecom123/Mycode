@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`。当前提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**，以及 **Phase 6A：加密证据存储、15 天留存与全部删除**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6 总状态为 `in_progress`、Phase 6B/6C 均为 `pending`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -29,8 +29,12 @@
 - 由公开 manifest key 固定的开发扩展 ID `hchaloelgnennaojaiikeebhajcoccih`，不提交私钥；
 - 开发期 PyInstaller Host 构建脚本、SHA-256 build metadata、Chrome/Edge 当前用户 manifest/注册/检查/卸载脚本；
 - 源码 Host 真实子进程协议、隐私、连续请求隔离和零 TCP/UDP socket 验证，以及隔离测试注册表路径下的浏览器注册生命周期测试。
+- 严格 Endpoint Evidence Record、当前用户 `%LOCALAPPDATA%` 数据目录、DPAPI 保护的随机 256 位数据密钥；
+- 使用 `cryptography==49.0.0` AESGCM 的逐记录 AES-256-GCM、最小 SQLite 索引、按事件读取和稳定分页；
+- 精确 15 天清理、Native Host 检测时自动触发过期清理、SQLite/WAL 处理和全部本地证据数据删除；
+- 密文/标签/密钥/schema 损坏安全失败、数据库原文缺失和存储失败不阻断检测结果。
 
-生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路，以及 Phase 5A Native Messaging protocol/Host seam。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型、持久化结果或提供桌面 UI；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam，以及 Phase 6A 加密证据存储。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型或提供桌面 UI；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
 
 ## 2. 环境要求
 
@@ -39,7 +43,7 @@
 - Git，可执行 `git check-ignore`；
 - 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-生产 Wheel 没有第三方运行时依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
+生产 Wheel 的唯一第三方运行时依赖是固定 `cryptography==49.0.0`，用于 Phase 6A AES-256-GCM。构建和部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖；`pip wheel --no-index --no-deps` 只构建 ShieldDome Wheel，不会下载或封装该依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
 
 ## 3. 目录概览
 
@@ -67,6 +71,10 @@ endpoint_agent/
     native_protocol.py              Native Messaging framing 与集中资源上限
     native_payload.py               严格 request 白名单与 MailObservation 转换
     native_host.py                  origin 校验、Host handler 与 stdio 循环
+    evidence_record.py              严格 Endpoint Evidence Record 契约与规范序列化
+    key_protection.py               当前用户 SID/DPAPI 与随机数据密钥生命周期
+    evidence_crypto.py              AES-256-GCM 逐记录加解密和认证失败处理
+    evidence_store.py               每用户 SQLite、读取、分页、留存与全部删除
     feature_pipeline.py             确定性特征转换
     corpus.py                       Corpus Governance 深模块
     privacy.py                      candidate/FeatureVector/manifest 隐私扫描
@@ -82,6 +90,9 @@ endpoint_agent/
     test_native_protocol.py         framing、UTF-8/JSON 与资源边界
     test_native_payload.py          payload 白名单、注入拒绝与长度边界
     test_native_host.py             BytesIO Host、origin、投影与错误隔离
+    test_key_protection.py          真实 DPAPI、用户作用域、目录和损坏密钥
+    test_evidence_crypto.py         AES-GCM 随机化、往返和篡改拒绝
+    test_evidence_store.py          SQLite 隐私、分页、15 天清理和全部删除
     test_extension_static.py        MV3 权限、源码离线和 chinaccs/UI 约束
   extension/                        独立 Phase 5A chinaccs MV3 插件
   native_host/                      开发期 manifest 与 Phase 5B 边界说明
@@ -237,7 +248,71 @@ outcome = DetectionKernel(UnavailableModelAdapter()).detect(
 
 `MODEL_ASSESSMENT_SCHEMA_VERSION` 为 `1.0`，`DETECTION_OUTCOME_SCHEMA_VERSION` 为 `2.0`；Feature Schema 继续为 `2.0`，Corpus Schema 继续为 `3.0`。
 
-## 7. Corpus Governance
+## 7. Local Evidence Store
+
+Phase 6A 的公开契约：
+
+```python
+from datetime import datetime, timezone
+
+from shielddome_endpoint import EndpointEvidenceRecord, EvidenceStore
+
+
+now = datetime.now(timezone.utc)
+record = EndpointEvidenceRecord.from_detection_outcome(
+    outcome,
+    detected_at=now,
+    source_kind="browser_native",
+)
+store = EvidenceStore()
+store.put(record)
+
+same_record = store.get(record.local_event_id)
+latest_page = store.list_page(offset=0, limit=50)
+deleted_expired = store.cleanup_expired(now=now)
+deleted_all = store.delete_all()
+```
+
+生产默认目录固定为：
+
+```text
+%LOCALAPPDATA%\ShieldDome\EndpointAgent\
+  keys\evidence.key
+  data\evidence.sqlite3
+```
+
+`EvidenceStore()` 不接受来自 Native Messaging payload 的路径、密钥、nonce、事件所有权或留存结论。默认目录来自当前 Windows 用户的 `LOCALAPPDATA`；系统共享路径或位于当前用户 `LOCALAPPDATA` 外的显式路径会被拒绝。显式路径参数只用于当前用户目录内的测试/受控集成，不能用于跨用户数据库。
+
+密钥和加密边界：
+
+- 首次写入生成随机 32 字节数据密钥；只把 DPAPI 保护包写入 `keys\evidence.key`；
+- DPAPI 固定当前用户范围和禁止 UI 标志，不使用 LocalMachine；保护包还绑定当前用户 SID 摘要；
+- 已存在数据库但密钥缺失、保护包损坏、SID 作用域不匹配或解密失败时不会静默生成新密钥；
+- 每条记录用 `cryptography` `AESGCM`、32 字节密钥、12 字节随机 nonce 和 16 字节认证标签独立加密；
+- event ID、检测/过期 UTC 和 schema 作为 associated data 绑定，索引被修改也会导致认证失败；
+- nonce、密文、标签、密钥和异常堆栈不会写到 Native Messaging stdout。
+
+Endpoint Evidence Record 只允许：事件 ID、检测/过期时间、风险等级、检测状态、通用动作、来源类型、稳定规则代码、拒判布尔值、降级布尔值、模型执行状态、稳定错误码和 schema。未知字段、未来 schema、超长字段、非法 enum、naive 时间、重复规则代码和非 15 天留存窗口全部拒绝。邮件主题、正文、完整地址、URL、附件名/内容、原始 `.eml`、Token 和密码没有持久化字段。
+
+SQLite 表只包含：
+
+```text
+local_event_id
+detected_at_utc
+expires_at_utc
+schema_version
+nonce
+ciphertext
+authentication_tag
+```
+
+读取顺序固定为 `detected_at_utc DESC, local_event_id DESC`，单页 1–100 条。任一页中一条记录认证、schema 或索引绑定失败时，整个读取安全失败，不返回部分结果。
+
+留存边界是 `expires_at <= now`；`now` 和默认 clock 都可注入测试。Native Host 每次成功检测后先尽力触发过期清理，再尽力写入当前记录。清理使用 SQLite `secure_delete` 和 WAL checkpoint/truncate；全部删除还执行 VACUUM，关闭连接，覆写后删除自有 database/WAL/SHM/journal/temp 与 DPAPI 保护密钥。覆写不替代底层存储介质保证，删除保护密钥同时提供密码学销毁边界。
+
+存储初始化、清理、投影或写入失败都不会阻断现有检测结果；Native Host 仍只返回 `local_event_id`、`risk_level`、`execution_state` 和 `generic_action`。
+
+## 8. Corpus Governance
 
 稳定入口：
 
@@ -351,7 +426,7 @@ snapshot = CorpusGovernance().prepare((candidate,), split_policy=policy)
 
 `CorpusSnapshot` 只是内存领域结果。本阶段不提供文件导入、snapshot 持久化、数据加载器或训练入口。
 
-## 8. 隐私扫描
+## 9. 隐私扫描
 
 ```python
 from shielddome_endpoint import PrivacyScanner
@@ -378,7 +453,7 @@ rule_result = scanner.scan_rule_assessments(rules)
 
 所有 violation code 都排序并去重；结果不会包含命中原值、内容片段或身份信息。隐私扫描是结构化输出的防回归门禁，不替代候选数据的人工脱敏和审核，也不是邮件脱敏器。
 
-## 9. 测试与包导入
+## 10. 测试与包导入
 
 在仓库根目录运行完整 Endpoint Agent 测试：
 
@@ -386,7 +461,15 @@ rule_result = scanner.scan_rule_assessments(rules)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前无打包 Host 的开发环境完整 Endpoint Agent 回归应运行 155 项测试：154 项通过，打包 Host 契约因 `.exe` 不存在明确跳过 1 项；不得把该跳过解释为 Phase 5B 已完成。具备有效 `.exe` 后，打包 Host 契约必须运行且不再跳过，命令仍须以退出码 0 结束且没有 failure 或 error。
+当前无打包 Host 的开发环境完整 Endpoint Agent 回归应运行 176 项测试：175 项通过，打包 Host 契约因 `.exe` 不存在明确跳过 1 项；不得把该跳过解释为 Phase 5B 已完成。具备有效 `.exe` 后，打包 Host 契约必须运行且不再跳过，命令仍须以退出码 0 结束且没有 failure 或 error。
+
+运行 Phase 6A 单个测试模块：
+
+```powershell
+python -m unittest discover -s endpoint_agent/tests -p "test_key_protection.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_evidence_crypto.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_evidence_store.py" -v
+```
 
 运行 Phase 1 单个测试模块：
 
@@ -412,13 +495,13 @@ $env:PYTHONPATH = (Resolve-Path endpoint_agent\src).Path
 python -c "import shielddome_endpoint as s; print(s.__version__, s.FEATURE_SCHEMA_VERSION, s.CORPUS_SCHEMA_VERSION, s.DETECTION_OUTCOME_SCHEMA_VERSION)"
 ```
 
-## 10. 离线构建 Wheel
+## 11. 离线构建 Wheel
 
 ```powershell
 python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
 ```
 
-构建由 `endpoint_agent/_build_backend.py` 完成，不要求 setuptools、wheel、Flit 或 Hatchling。`--no-index` 阻止访问包索引，`pyproject.toml` 没有第三方运行时依赖。
+构建由 `endpoint_agent/_build_backend.py` 完成，不要求 setuptools、wheel、Flit 或 Hatchling。`--no-index` 阻止访问包索引；Wheel metadata 会声明 `Requires-Dist: cryptography==49.0.0`，但 `--no-deps` 不会下载或打包该依赖。批准的离线 Host/Endpoint Release 构建环境必须另行提供匹配 wheel。
 
 成功时生成：
 
@@ -428,7 +511,7 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 
 `dist/` 属于可再生成且已忽略的本地产物。
 
-### 10.1 Windows Native Messaging Host
+### 11.1 Windows Native Messaging Host
 
 Host 使用现有 `shielddome_endpoint.native_host.main()`，不会创建 HTTP/WebSocket/TCP/UDP 服务：
 
@@ -456,7 +539,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 
 脚本只使用两个 HKCU Native Messaging Host 键，不要求管理员权限；路径中的空格和中文由自动化测试覆盖。完整 Chrome/Edge 人工验收见 `docs/BROWSER_ACCEPTANCE.md`。
 
-## 11. 数据和离线边界
+## 12. 数据和离线边界
 
 以下内容必须保留在 Git 之外：
 
@@ -474,24 +557,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - 不调用中心后台、外部模型、信誉服务、遥测或更新服务；
 - 不下载、打开、解压、预览或执行附件。
 
-## 12. 尚未实现
+## 13. 尚未实现
 
-Phase 5A/当前 Phase 5B 明确尚未交付：
+当前明确尚未交付：
 
 - Approved Training Corpus、正式模型训练或生产模型；
 - Phase 3 文本编码器、微调、量化或最低硬件发布评测；
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- 数据库、DPAPI、AES-GCM、15 天留存；
+- Phase 6B Confirmed Example Library 与有限校准；
+- Phase 6C 脱敏诊断包导出；
 - 托盘、控制台、`.eml` 或邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A 已完成，但 Phase 6 总状态因 6B/6C 未实现而保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-## 13. 修改后的最低验证
+## 14. 修改后的最低验证
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
+python -m unittest discover -s endpoint_agent/tests -p "test_key_protection.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_evidence_crypto.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_evidence_store.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_protocol.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_payload.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_host.py" -v
@@ -500,11 +587,11 @@ python -m unittest discover -s endpoint_agent/tests -p "test_native_packaging.py
 node --check endpoint_agent/extension/background.js
 node --check endpoint_agent/extension/content.js
 node --check endpoint_agent/extension/adapters/chinaccs.js
-powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\build-host.ps1
-python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase5b
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase6a
 git status --short
 git diff --stat
 git diff -- endpoint_agent
+git status --short -- app shielddome frontend extension web deploy scripts
 ```
 
 同时确认生产源码仍由离线 guard 全量扫描，corpus 数据/snapshot/训练输出被忽略，且业务代码修改只位于 `endpoint_agent/`。

@@ -46,6 +46,19 @@ def detect_message(**mail_changes):
     return {"protocol_version": "1.0", "message_type": "detect_mail", "mail": mail}
 
 
+class RecordingEvidenceStore:
+    def __init__(self):
+        self.records = []
+        self.cleanup_times = []
+
+    def cleanup_expired(self, *, now):
+        self.cleanup_times.append(now)
+        return 0
+
+    def put(self, record):
+        self.records.append(record)
+
+
 class NativeHostTests(unittest.TestCase):
     def test_run_native_host_handles_ping_through_bytesio(self):
         from shielddome_endpoint.native_host import (
@@ -74,10 +87,12 @@ class NativeHostTests(unittest.TestCase):
         )
 
         output = BytesIO()
+        evidence_store = RecordingEvidenceStore()
         handler = NativeHostHandler(
             DEVELOPMENT_EXTENSION_ORIGIN,
             clock=lambda: OBSERVED_AT,
             event_id_factory=lambda: "event-native-test",
+            evidence_store_factory=lambda: evidence_store,
         )
         run_native_host(BytesIO(frame(detect_message())), output, handler)
 
@@ -95,6 +110,13 @@ class NativeHostTests(unittest.TestCase):
             set(response),
             {"local_event_id", "risk_level", "execution_state", "generic_action"},
         )
+        self.assertEqual(len(evidence_store.records), 1)
+        self.assertEqual(
+            evidence_store.records[0].local_event_id,
+            "event-native-test",
+        )
+        self.assertEqual(evidence_store.records[0].source_kind, "browser_native")
+        self.assertEqual(evidence_store.cleanup_times, [OBSERVED_AT])
 
     def test_invalid_extension_origin_is_rejected_without_trusting_json(self):
         from shielddome_endpoint.native_host import NativeHostHandler, run_native_host
@@ -172,6 +194,91 @@ class NativeHostTests(unittest.TestCase):
         output = BytesIO()
         run_native_host(BytesIO(), output, lambda message: message)
         self.assertEqual(output.getvalue(), b"")
+
+    def test_storage_failure_does_not_block_or_leak_the_detection_result(self):
+        from shielddome_endpoint.native_host import (
+            DEVELOPMENT_EXTENSION_ORIGIN,
+            NativeHostHandler,
+            run_native_host,
+        )
+
+        class FailingEvidenceStore:
+            def put(self, _record):
+                raise RuntimeError(
+                    "private subject body key nonce ciphertext tag traceback"
+                )
+
+        output = BytesIO()
+        handler = NativeHostHandler(
+            DEVELOPMENT_EXTENSION_ORIGIN,
+            evidence_store_factory=lambda: FailingEvidenceStore(),
+            clock=lambda: OBSERVED_AT,
+            event_id_factory=lambda: "event-storage-failure",
+        )
+        message = detect_message(
+            subject="private subject",
+            sanitized_body_text="private body",
+        )
+
+        run_native_host(BytesIO(frame(message)), output, handler)
+
+        response = decode_frames(output.getvalue())[0]
+        self.assertEqual(
+            set(response),
+            {"local_event_id", "risk_level", "execution_state", "generic_action"},
+        )
+        for forbidden in (
+            b"private subject",
+            b"private body",
+            b"key",
+            b"nonce",
+            b"ciphertext",
+            b"tag",
+            b"traceback",
+        ):
+            self.assertNotIn(forbidden, output.getvalue().lower())
+
+    def test_consecutive_detections_persist_separate_event_records(self):
+        from shielddome_endpoint.native_host import (
+            DEVELOPMENT_EXTENSION_ORIGIN,
+            NativeHostHandler,
+            run_native_host,
+        )
+
+        event_ids = iter(("event-first-store", "event-second-store"))
+        evidence_store = RecordingEvidenceStore()
+        handler = NativeHostHandler(
+            DEVELOPMENT_EXTENSION_ORIGIN,
+            evidence_store_factory=lambda: evidence_store,
+            clock=lambda: OBSERVED_AT,
+            event_id_factory=event_ids.__next__,
+        )
+        second = detect_message(
+            attachment_metadata=[
+                {
+                    "name": "synthetic.pdf.exe",
+                    "declared_type": "application/octet-stream",
+                    "displayed_size": "1 KB",
+                }
+            ]
+        )
+        output = BytesIO()
+
+        run_native_host(
+            BytesIO(frame(detect_message()) + frame(second)),
+            output,
+            handler,
+        )
+
+        responses = decode_frames(output.getvalue())
+        self.assertEqual(
+            tuple(record.local_event_id for record in evidence_store.records),
+            ("event-first-store", "event-second-store"),
+        )
+        self.assertEqual(
+            tuple(record.risk_level.value for record in evidence_store.records),
+            tuple(response["risk_level"] for response in responses),
+        )
 
 
 if __name__ == "__main__":

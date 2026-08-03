@@ -4,6 +4,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import time
 import unittest
 
@@ -62,16 +63,19 @@ class _NativeHostProcessContract:
         return os.environ.copy()
 
     def run_host(self, input_bytes):
-        result = subprocess.run(
-            self.host_command(),
-            input=input_bytes,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=self.host_environment(),
-            cwd=ENDPOINT_ROOT.parent,
-            timeout=20,
-            check=False,
-        )
+        with TemporaryDirectory() as local_app_data:
+            environment = self.host_environment()
+            environment["LOCALAPPDATA"] = local_app_data
+            result = subprocess.run(
+                self.host_command(),
+                input=input_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                cwd=ENDPOINT_ROOT.parent,
+                timeout=20,
+                check=False,
+            )
         return result, decode_frames(result.stdout)
 
     def test_ping_and_minimum_detect_mail_use_protocol_stdout(self):
@@ -149,47 +153,50 @@ class _NativeHostProcessContract:
 
     @unittest.skipUnless(sys.platform == "win32", "Windows listener check")
     def test_host_creates_no_tcp_or_udp_socket(self):
-        process = subprocess.Popen(
-            self.host_command(),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=self.host_environment(),
-            cwd=ENDPOINT_ROOT.parent,
-        )
-        try:
-            time.sleep(0.4)
-            check = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    (
-                        f"$tcp = @(Get-NetTCPConnection -OwningProcess {process.pid} "
-                        "-ErrorAction SilentlyContinue).Count; "
-                        f"$udp = @(Get-NetUDPEndpoint -OwningProcess {process.pid} "
-                        "-ErrorAction SilentlyContinue).Count; "
-                        "'{0},{1}' -f $tcp,$udp"
-                    ),
-                ],
+        with TemporaryDirectory() as local_app_data:
+            environment = self.host_environment()
+            environment["LOCALAPPDATA"] = local_app_data
+            process = subprocess.Popen(
+                self.host_command(),
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                timeout=10,
-                check=False,
+                env=environment,
+                cwd=ENDPOINT_ROOT.parent,
             )
-            self.assertEqual(check.returncode, 0, check.stderr)
-            self.assertEqual(check.stdout.strip(), "0,0")
-        finally:
-            if process.stdin:
-                process.stdin.close()
-            process.wait(timeout=10)
-            if process.stdout:
-                self.assertEqual(process.stdout.read(), b"")
-                process.stdout.close()
-            if process.stderr:
-                self.assertEqual(process.stderr.read(), b"")
-                process.stderr.close()
+            try:
+                time.sleep(0.4)
+                check = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        (
+                            f"$tcp = @(Get-NetTCPConnection -OwningProcess {process.pid} "
+                            "-ErrorAction SilentlyContinue).Count; "
+                            f"$udp = @(Get-NetUDPEndpoint -OwningProcess {process.pid} "
+                            "-ErrorAction SilentlyContinue).Count; "
+                            "'{0},{1}' -f $tcp,$udp"
+                        ),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(check.returncode, 0, check.stderr)
+                self.assertEqual(check.stdout.strip(), "0,0")
+            finally:
+                if process.stdin:
+                    process.stdin.close()
+                process.wait(timeout=10)
+                if process.stdout:
+                    self.assertEqual(process.stdout.read(), b"")
+                    process.stdout.close()
+                if process.stderr:
+                    self.assertEqual(process.stderr.read(), b"")
+                    process.stderr.close()
 
 
 class SourceNativeHostProcessTests(_NativeHostProcessContract, unittest.TestCase):

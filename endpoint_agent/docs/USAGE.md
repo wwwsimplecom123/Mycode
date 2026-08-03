@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**，以及 **Phase 4A.1：本地规则评估与端到端 Local Detection Service**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 和 Phase 5 保持 `pending`。当前提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 为 `pending`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -23,8 +23,11 @@
 - 精确四字段插件投影、内存私密证据投影和 DetectionOutcome 隐私扫描。
 - Feature Schema 2.0 完整边界验证、集中式本地规则策略和稳定不可变 `RuleAssessment` tuple；
 - 从 `MailObservation` 到 `DetectionOutcome` 的固定内存链路 `LocalDetectionService.detect(...)`。
+- 4 字节 little-endian + UTF-8 JSON Native Messaging 协议、严格 payload 白名单、集中资源上限和稳定错误码；
+- `run_native_host(input_stream, output_stream, handler)` BytesIO seam、固定开发 extension origin 与四字段最小结果；
+- `endpoint_agent/extension/` 下只匹配 `https://webmail.chinaccs.cn/*`、不含网络客户端、服务器地址或插件 Token 的独立 MV3 插件。
 
-生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理以及 Phase 4A/4A.1 本地检测链路。Phase 2 能力仍只存在于开发期训练目录，不会进入生产 Wheel。当前不会读取邮箱、解析 `.eml`、实现 Native Messaging、提供浏览器插件、加载生产模型、持久化结果或提供 UI；它能从调用方提供的 `MailObservation` 事实生成完整内存 `DetectionOutcome`，但还不是可交付的终端检测程序。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路，以及 Phase 5A Native Messaging protocol/Host seam。Phase 2 能力仍只存在于开发期训练目录，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型、持久化结果或提供桌面 UI；Phase 5A 插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实，并且尚未构建或注册可供真实浏览器启动的 Host 可执行文件。
 
 ## 2. 环境要求
 
@@ -58,6 +61,9 @@ endpoint_agent/
     detection_kernel.py             DetectionOutcome 唯一编排入口
     rule_evaluator.py               FeatureVector 验证与集中式本地规则
     local_detection.py              observation 到 outcome 的可信检测 seam
+    native_protocol.py              Native Messaging framing 与集中资源上限
+    native_payload.py               严格 request 白名单与 MailObservation 转换
+    native_host.py                  origin 校验、Host handler 与 stdio 循环
     feature_pipeline.py             确定性特征转换
     corpus.py                       Corpus Governance 深模块
     privacy.py                      candidate/FeatureVector/manifest 隐私扫描
@@ -70,6 +76,12 @@ endpoint_agent/
     test_detection_kernel.py        Kernel、降级和投影边界
     test_offline_constraints.py     离线边界
     test_repository_hygiene.py      Git 忽略规则
+    test_native_protocol.py         framing、UTF-8/JSON 与资源边界
+    test_native_payload.py          payload 白名单、注入拒绝与长度边界
+    test_native_host.py             BytesIO Host、origin、投影与错误隔离
+    test_extension_static.py        MV3 权限、源码离线和 chinaccs/UI 约束
+  extension/                        独立 Phase 5A chinaccs MV3 插件
+  native_host/                      开发期 manifest 与 Phase 5B 边界说明
   training/shielddome_training/     Phase 2 独立训练侧深模块
   training/run_synthetic_experiment.py  合成链路 CLI
   training_tests/                   Phase 2 unittest
@@ -132,7 +144,7 @@ vector = FeaturePipeline().transform(observation)
 
 ## 5. Local Detection Service
 
-未来 Native Messaging host 的唯一检测 seam：
+Phase 5A Native Messaging Host 使用的唯一检测 seam：
 
 ```python
 from datetime import datetime, timezone
@@ -365,7 +377,7 @@ rule_result = scanner.scan_rule_assessments(rules)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前完整 Endpoint Agent 回归应发现 115 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
+当前完整 Endpoint Agent 回归应发现 142 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
 
 运行 Phase 1 单个测试模块：
 
@@ -427,27 +439,29 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 
 ## 12. 尚未实现
 
-Phase 4A.1 明确不包含：
+Phase 5A 明确不包含：
 
 - Approved Training Corpus、正式模型训练或生产模型；
 - Phase 3 文本编码器、微调、量化或最低硬件发布评测；
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
-- Native Messaging、浏览器插件或本地网络服务；
+- Host 可执行文件、Windows 注册表、Chrome/Edge Native Host 注册或真实浏览器联调；
 - 数据库、DPAPI、AES-GCM、15 天留存；
 - 托盘、控制台、`.eml` 或邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。下一步是依赖 Phase 4A.1 的可信本地检测 seam 实施仍为 `pending` 的 Phase 5；这不代表绕过模型合规要求。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。下一步是仍为 `pending` 的 Phase 5B：构建 Host 可执行文件、确定正式扩展 ID、注册 Chrome/Edge Native Host 并完成真实浏览器验收；这不代表绕过模型合规要求。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 13. 修改后的最低验证
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
-python -m unittest discover -s endpoint_agent/tests -p "test_inference.py" -v
-python -m unittest discover -s endpoint_agent/tests -p "test_risk_fusion.py" -v
-python -m unittest discover -s endpoint_agent/tests -p "test_detection_kernel.py" -v
-.\endpoint_agent\.venv-training\Scripts\python.exe -m unittest discover -s endpoint_agent/training_tests -v
-python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase4a
+python -m unittest discover -s endpoint_agent/tests -p "test_native_protocol.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_native_payload.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_native_host.py" -v
+node --check endpoint_agent/extension/background.js
+node --check endpoint_agent/extension/content.js
+node --check endpoint_agent/extension/adapters/chinaccs.js
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase5a
 git status --short
 git diff --stat
 git diff -- endpoint_agent

@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**，以及 **Phase 4A.1：本地规则评估与 Local Detection Service**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 和 Phase 5 保持 `pending`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 保持 `pending`。
 
 现有生产包只包含：
 
@@ -34,11 +34,14 @@
 - 固定执行 observation 验证、Feature Pipeline、本地规则和 Detection Kernel 的 `LocalDetectionService.detect(...) -> DetectionOutcome`；
 - 不可变的 `RuleAssessment`、模型输出校验、确定性风险融合和强证据风险下限；
 - `DetectionKernel.detect(...) -> DetectionOutcome`、规则模式/拒判/故障降级、私密证据投影和精确四字段插件投影；
+- 严格 Native Messaging framing、固定协议版本、集中资源上限、payload 白名单与稳定错误码；
+- 固定开发 extension origin 校验、可通过 `BytesIO` 测试的 Host 循环，以及只返回四字段投影的检测 handler；
+- 位于 `endpoint_agent/extension/`、仅匹配 chinaccs Webmail、只用 Native Messaging 的独立 MV3 插件；
 - `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`。
 
 独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
 
-现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、插件字段白名单和 DetectionOutcome 隐私扫描。未来插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、Native Messaging、数据库、加密存储或 UI；不得把少量合成实验指标、Phase 4A/4A.1 interface 或 `README.md` 的目标能力误认为正式模型已经交付。
+现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束和 DetectionOutcome 隐私扫描。插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、Host 可执行文件/浏览器注册、数据库、加密存储或桌面 UI；不得把少量合成实验指标、Phase 4A/4A.1 interface 或 `README.md` 的目标能力误认为正式模型已经交付。
 
 ## 3. 目录边界
 

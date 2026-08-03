@@ -147,3 +147,9 @@ class PackageImportTests(unittest.TestCase):
         ):
             with self.subTest(public_type=public_type):
                 self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_five_a_host_seams(self):
+        from shielddome_endpoint import NativeHostHandler, run_native_host
+
+        self.assertIsNotNone(NativeHostHandler)
+        self.assertIsNotNone(run_native_host)

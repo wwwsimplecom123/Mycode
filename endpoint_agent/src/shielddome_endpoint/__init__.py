@@ -54,6 +54,7 @@ from .inference import (
     UnavailableModelAdapter,
 )
 from .local_detection import LocalDetectionService
+from .native_host import NativeHostHandler, run_native_host
 from .rule_evaluator import FeatureVectorValidationError, LocalRuleEvaluator
 
 
@@ -90,6 +91,8 @@ __all__ = [
     "FeatureVectorValidationError",
     "LocalRuleEvaluator",
     "LocalDetectionService",
+    "NativeHostHandler",
+    "run_native_host",
     "FeaturePipeline",
     "TEXT_HASH_DIMENSION",
     "FEATURE_TEXT_MAX_CHARACTERS",

@@ -483,15 +483,31 @@ Phase 5–7 的系统框架可依赖稳定的 Phase 4A interface 继续开发，
 
 ### Phase 5：Native Messaging 与新浏览器插件
 
-Status: pending
+Status: in_progress
+
+#### Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件
+
+Status: complete
 
 - 在 `endpoint_agent/extension/` 建立独立 MV3 插件。
-- 移植必要 DOM adapters，但不修改现有 `extension/`。
-- 实现固定扩展 ID allowlist 和 Native Messaging protocol。
+- 实现 chinaccs 专用 DOM adapter，但不修改现有 `extension/`。
+- 实现固定开发扩展 origin allowlist、严格 Native Messaging framing/payload protocol 和稳定错误码。
 - 删除服务器地址、Token、HTTP 轮询和外部连接。
-- 实现 Agent 未启动、超时、拒判和降级展示。
+- Host 自行执行 `MailObservation → LocalDetectionService → DetectionOutcome → minimal_plugin_projection`。
+- 实现 Agent/Host/协议/超限/正文未识别、拒判和降级展示。
 
-完成条件：浏览器邮件检测全程无网络请求，插件只显示最小结果。
+完成条件：Python 协议/Host/插件静态测试、完整 Endpoint Agent 回归、JavaScript 语法检查和离线 Wheel 构建通过。
+
+#### Phase 5B：Host 可执行文件、浏览器注册和真实 Edge/Chrome 验收
+
+Status: pending
+
+- 构建 Windows Host 可执行文件并确定正式企业扩展 ID。
+- 生成实际安装路径的 Chrome/Edge Native Host manifests。
+- 实施每浏览器注册、卸载和升级流程。
+- 在真实 chinaccs 邮件详情页完成 Edge/Chrome Native Messaging 验收。
+
+Phase 5 总完成条件：Phase 5A 与 Phase 5B 均完成，真实浏览器邮件检测全程无网络请求，插件只显示最小结果。Phase 5A 完成后 Phase 5 总状态保持 `in_progress`。
 
 ### Phase 6：加密存储、样本库和留存
 
@@ -595,4 +611,4 @@ Status: pending
 
 Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔离的 Approved Training Corpus 而有意暂缓，继续保持 `pending`；不得用 Phase 2 合成 fixture 选择正式文本编码模型。Phase 4A 已完成，Phase 4 总状态为 `in_progress`，Phase 4B 继续等待 Phase 3 的正式模型。
 
-下一步是基于 Phase 4A.1 的可信本地检测 seam 实施 **Phase 5：Native Messaging 与新浏览器插件**。Phase 5 当前仍为 `pending`，本次没有提前实现其协议、host 或插件。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5 总状态为 `in_progress`；下一步是仍为 `pending` 的 Phase 5B：Host 可执行文件、正式扩展身份、浏览器注册和真实 Edge/Chrome 验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。

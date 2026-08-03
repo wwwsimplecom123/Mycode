@@ -4,9 +4,9 @@ This directory contains the design and, later, the implementation of the standal
 
 ## Current Implementation Status
 
-Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 remains pending.
+Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B remains pending.
 
-The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, and private/minimal result projections. With no model adapter, or when a model adapter is unavailable, invalid, timed out, or raises an exception, detection still returns the deterministic rule result. There is no Native Messaging implementation, browser extension, production ONNX Runtime adapter, or formal model in this repository.
+The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only. With no model adapter, detection still returns the deterministic rule result. There is no Host executable, browser registration, real Chrome/Edge acceptance, production ONNX Runtime adapter, or formal model in this repository.
 
 ## Product Definition
 
@@ -49,7 +49,7 @@ flowchart LR
     Evidence --> Dashboard[Personal Security Dashboard]
 ```
 
-The Local Detection Service is the future Native Messaging host's top-level deep module. Callers submit only `MailObservation` facts plus host-controlled identity/time context and do not provide rules, scores, Model Assessment, execution state, action, retention, role, permission, or ownership conclusions.
+The Local Detection Service is the Phase 5A Native Messaging Host's top-level detection module. Callers submit only `MailObservation` facts plus host-controlled identity/time context and do not provide rules, scores, Model Assessment, execution state, action, retention, role, permission, or ownership conclusions.
 
 ## Deep Modules
 

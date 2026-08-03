@@ -1,0 +1,9 @@
+{
+  "name": "cn.shielddome.endpoint_agent",
+  "description": "ShieldDome Endpoint Agent Native Host - DEVELOPMENT ONLY",
+  "path": "C:\\ShieldDome-Development\\shielddome-endpoint-host.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+  ]
+}

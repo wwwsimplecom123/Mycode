@@ -1,0 +1,37 @@
+:root {
+  --shielddome-ink: #172033;
+  --shielddome-surface: #f6f8fb;
+  --shielddome-border: #c8d0dc;
+  --shielddome-safe: #16734a;
+  --shielddome-caution: #9a5b00;
+  --shielddome-danger: #b42318;
+}
+
+#shielddome-endpoint-status {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 4px 22px minmax(0, 1fr) 28px;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  margin: 0 0 8px;
+  border: 1px solid var(--shielddome-border);
+  border-left: 4px solid var(--shielddome-caution);
+  background: var(--shielddome-surface);
+  color: var(--shielddome-ink);
+  font: 13px/1.35 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+#shielddome-endpoint-status[data-state="low"] { border-left-color: var(--shielddome-safe); }
+#shielddome-endpoint-status[data-state="high"],
+#shielddome-endpoint-status[data-state="critical"],
+#shielddome-endpoint-status[data-state="protocol_error"] { border-left-color: var(--shielddome-danger); }
+.shielddome-status-icon { color: currentColor; text-align: center; }
+.shielddome-status-copy { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding: 7px 8px; }
+.shielddome-status-copy strong { font-weight: 650; }
+.shielddome-status-copy code { font: 11px/1.4 Consolas, "SFMono-Regular", monospace; overflow-wrap: anywhere; }
+.shielddome-status-close { align-self: stretch; border: 0; border-left: 1px solid var(--shielddome-border); background: transparent; color: inherit; cursor: pointer; font: 18px/1 system-ui, sans-serif; }
+.shielddome-status-close:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+#shielddome-endpoint-status[data-state="detecting"] .shielddome-status-icon { animation: shielddome-spin 1s linear infinite; }
+@keyframes shielddome-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #shielddome-endpoint-status .shielddome-status-icon { animation: none; } }

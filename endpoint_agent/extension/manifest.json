@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "ShieldDome Endpoint Mail Protection",
+  "version": "0.1.0",
+  "description": "Offline warning-only mail risk status for the ShieldDome Endpoint Agent.",
+  "permissions": ["nativeMessaging"],
+  "icons": {
+    "16": "icons/shield-16.png",
+    "32": "icons/shield-32.png",
+    "48": "icons/shield-48.png",
+    "128": "icons/shield-128.png"
+  },
+  "action": {
+    "default_title": "ShieldDome Endpoint Agent",
+    "default_icon": {
+      "16": "icons/shield-16.png",
+      "32": "icons/shield-32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://webmail.chinaccs.cn/*"],
+      "js": ["adapters/chinaccs.js", "content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

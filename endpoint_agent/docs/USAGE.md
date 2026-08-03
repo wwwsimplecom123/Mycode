@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 为 `pending`。当前提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -26,8 +26,11 @@
 - 4 字节 little-endian + UTF-8 JSON Native Messaging 协议、严格 payload 白名单、集中资源上限和稳定错误码；
 - `run_native_host(input_stream, output_stream, handler)` BytesIO seam、固定开发 extension origin 与四字段最小结果；
 - `endpoint_agent/extension/` 下只匹配 `https://webmail.chinaccs.cn/*`、不含网络客户端、服务器地址或插件 Token 的独立 MV3 插件。
+- 由公开 manifest key 固定的开发扩展 ID `hchaloelgnennaojaiikeebhajcoccih`，不提交私钥；
+- 开发期 PyInstaller Host 构建脚本、SHA-256 build metadata、Chrome/Edge 当前用户 manifest/注册/检查/卸载脚本；
+- 源码 Host 真实子进程协议、隐私、连续请求隔离和零 TCP/UDP socket 验证，以及隔离测试注册表路径下的浏览器注册生命周期测试。
 
-生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路，以及 Phase 5A Native Messaging protocol/Host seam。Phase 2 能力仍只存在于开发期训练目录，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型、持久化结果或提供桌面 UI；Phase 5A 插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实，并且尚未构建或注册可供真实浏览器启动的 Host 可执行文件。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路，以及 Phase 5A Native Messaging protocol/Host seam。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型、持久化结果或提供桌面 UI；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
 
 ## 2. 环境要求
 
@@ -36,7 +39,7 @@
 - Git，可执行 `git check-ignore`；
 - 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-生产 Wheel 没有第三方运行时依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
+生产 Wheel 没有第三方运行时依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
 
 ## 3. 目录概览
 
@@ -82,6 +85,12 @@ endpoint_agent/
     test_extension_static.py        MV3 权限、源码离线和 chinaccs/UI 约束
   extension/                        独立 Phase 5A chinaccs MV3 插件
   native_host/                      开发期 manifest 与 Phase 5B 边界说明
+    identity.json                   公开开发扩展 ID/origin 与 Host 名称
+    build-host.ps1                  被忽略的一文件 Host 构建和 SHA-256 metadata
+    install-host.ps1                当前用户 Chrome/Edge 注册
+    check-host.ps1                  Host、manifest、origin 与注册自检
+    uninstall-host.ps1              仅清理 ShieldDome 自有项
+  packaging/native_host_entry.py    PyInstaller stdio Host 入口
   training/shielddome_training/     Phase 2 独立训练侧深模块
   training/run_synthetic_experiment.py  合成链路 CLI
   training_tests/                   Phase 2 unittest
@@ -377,7 +386,7 @@ rule_result = scanner.scan_rule_assessments(rules)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前完整 Endpoint Agent 回归应发现 142 项测试。验收时命令必须以退出码 0 结束，且没有 failure、error 或 skip。
+当前无打包 Host 的开发环境完整 Endpoint Agent 回归应运行 155 项测试：154 项通过，打包 Host 契约因 `.exe` 不存在明确跳过 1 项；不得把该跳过解释为 Phase 5B 已完成。具备有效 `.exe` 后，打包 Host 契约必须运行且不再跳过，命令仍须以退出码 0 结束且没有 failure 或 error。
 
 运行 Phase 1 单个测试模块：
 
@@ -419,6 +428,34 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 
 `dist/` 属于可再生成且已忽略的本地产物。
 
+### 10.1 Windows Native Messaging Host
+
+Host 使用现有 `shielddome_endpoint.native_host.main()`，不会创建 HTTP/WebSocket/TCP/UDP 服务：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\build-host.ps1
+python -m unittest discover -s endpoint_agent/tests -p "test_native_host_process.py" -v
+```
+
+成功时生成：
+
+```text
+endpoint_agent/dist/native-host/ShieldDomeEndpointHost.exe
+endpoint_agent/dist/native-host/build-metadata.json
+```
+
+构建输出均被 Git 忽略。`build-metadata.json` 绑定 Host SHA-256、绝对路径、Host 名称、开发扩展 ID/origin 和 PyInstaller 版本；注册前必须全部一致。当前环境的构建命令因没有离线 PyInstaller 而返回非零，因此不能执行默认浏览器注册。
+
+具备有效构建后，当前用户注册与自检命令为：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\install-host.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\check-host.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\uninstall-host.ps1
+```
+
+脚本只使用两个 HKCU Native Messaging Host 键，不要求管理员权限；路径中的空格和中文由自动化测试覆盖。完整 Chrome/Edge 人工验收见 `docs/BROWSER_ACCEPTANCE.md`。
+
 ## 11. 数据和离线边界
 
 以下内容必须保留在 Git 之外：
@@ -439,17 +476,17 @@ endpoint_agent/dist/shielddome_endpoint-0.1.0-py3-none-any.whl
 
 ## 12. 尚未实现
 
-Phase 5A 明确不包含：
+Phase 5A/当前 Phase 5B 明确尚未交付：
 
 - Approved Training Corpus、正式模型训练或生产模型；
 - Phase 3 文本编码器、微调、量化或最低硬件发布评测；
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
-- Host 可执行文件、Windows 注册表、Chrome/Edge Native Host 注册或真实浏览器联调；
+- 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
 - 数据库、DPAPI、AES-GCM、15 天留存；
 - 托盘、控制台、`.eml` 或邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。下一步是仍为 `pending` 的 Phase 5B：构建 Host 可执行文件、确定正式扩展 ID、注册 Chrome/Edge Native Host 并完成真实浏览器验收；这不代表绕过模型合规要求。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 13. 修改后的最低验证
 
@@ -458,10 +495,13 @@ python -m unittest discover -s endpoint_agent/tests -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_protocol.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_payload.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_host.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_native_host_process.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_native_packaging.py" -v
 node --check endpoint_agent/extension/background.js
 node --check endpoint_agent/extension/content.js
 node --check endpoint_agent/extension/adapters/chinaccs.js
-python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase5a
+powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\build-host.ps1
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase5b
 git status --short
 git diff --stat
 git diff -- endpoint_agent

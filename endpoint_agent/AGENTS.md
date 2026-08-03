@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 保持 `pending`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**，以及 **Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`。
 
 现有生产包只包含：
 
@@ -37,11 +37,13 @@
 - 严格 Native Messaging framing、固定协议版本、集中资源上限、payload 白名单与稳定错误码；
 - 固定开发 extension origin 校验、可通过 `BytesIO` 测试的 Host 循环，以及只返回四字段投影的检测 handler；
 - 位于 `endpoint_agent/extension/`、仅匹配 chinaccs Webmail、只用 Native Messaging 的独立 MV3 插件；
+- 由公开 manifest key 固定的开发扩展 ID、PyInstaller Host 构建配置、当前用户 Chrome/Edge manifest 与注册生命周期脚本；
+- 源码 Host 子进程协议/隐私/零 TCP/UDP socket 测试，以及独立测试注册表路径下的安装、检查、幂等与自有项卸载测试；
 - `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`。
 
 独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
 
-现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束和 DetectionOutcome 隐私扫描。插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、Host 可执行文件/浏览器注册、数据库、加密存储或桌面 UI；不得把少量合成实验指标、Phase 4A/4A.1 interface 或 `README.md` 的目标能力误认为正式模型已经交付。
+现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束和 DetectionOutcome 隐私扫描。插件只能提供 `MailObservation` 事实，不能提供规则、分数、强证据、模型状态或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收、数据库、加密存储或桌面 UI；Phase 5B 的构建与注册配置不等于 `.exe` 或浏览器验收已经完成。不得把少量合成实验指标、Phase 4A/4A.1 interface 或 `README.md` 的目标能力误认为正式模型已经交付。
 
 ## 3. 目录边界
 

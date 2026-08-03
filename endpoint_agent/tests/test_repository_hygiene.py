@@ -75,6 +75,10 @@ class RepositoryHygieneTests(unittest.TestCase):
             "endpoint_agent/src/shielddome_endpoint/__pycache__/domain.cpython-312.pyc",
             "endpoint_agent/build/temp.win-amd64/agent.obj",
             "endpoint_agent/dist/shielddome_endpoint.whl",
+            "endpoint_agent/dist/native-host/ShieldDomeEndpointHost.exe",
+            "endpoint_agent/dist/native-host/build-metadata.json",
+            "endpoint_agent/dist/native-host/manifests/Chrome/cn.shielddome.endpoint_agent.json",
+            "endpoint_agent/build/native-host/ShieldDomeEndpointHost.spec",
             "endpoint_agent/src/shielddome_endpoint.egg-info/PKG-INFO",
         ):
             with self.subTest(path=relative_path):

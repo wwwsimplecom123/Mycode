@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -117,3 +118,27 @@ class OfflineConstraintTests(unittest.TestCase):
         )
 
         self.assertEqual(violations, ())
+
+    def test_phase_five_b_packaging_and_registration_assets_are_offline(self):
+        packaging_sources = [ENDPOINT_ROOT / "packaging" / "native_host_entry.py"]
+        packaging_sources.extend((ENDPOINT_ROOT / "native_host").glob("*.ps1"))
+        packaging_sources.extend((ENDPOINT_ROOT / "native_host").glob("*.psm1"))
+        sources = "\n".join(path.read_text(encoding="utf-8") for path in packaging_sources)
+
+        forbidden = (
+            r"\bInvoke-WebRequest\b",
+            r"\bInvoke-RestMethod\b",
+            r"\bStart-BitsTransfer\b",
+            r"\b(?:curl|wget)\.exe\b",
+            r"\b(?:socket|requests|urllib3|httpx|aiohttp)\b",
+            r"\.(?:bind|listen|connect)\s*\(",
+            r"\b(?:http|https|ws|wss)://",
+            r"\bserver[_-]?address\b",
+            r"\bapi[_-]?key\b",
+            r"\btoken\b",
+        )
+        for pattern in forbidden:
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(re.search(pattern, sources, re.IGNORECASE))
+        self.assertIn("--no-index", sources)
+        self.assertNotIn("print(", (ENDPOINT_ROOT / "packaging" / "native_host_entry.py").read_text(encoding="utf-8"))

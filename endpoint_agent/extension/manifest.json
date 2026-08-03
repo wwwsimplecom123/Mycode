@@ -3,6 +3,7 @@
   "name": "ShieldDome Endpoint Mail Protection",
   "version": "0.1.0",
   "description": "Offline warning-only mail risk status for the ShieldDome Endpoint Agent.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArsPsH4lMsvQY0Z3bG0EOzd9liamC/HZp3cp2yW1V0+Hqn4+MQKKwhfFNEOLCTzO3Pvx2dgtj6T78JwmgxD5SQRubLfJHZxUTYYXxtEsXSmxqEDWTqVeB/VlZ4NjPTVuI2pPxvH095YrhyuxhvOmJ9fenpzxl5/BKSd9dZV+GwcthI34keVaHMe4EuXT8Cj/kp0ncwlt5UfNGLGjbjn+DcPEKnAOv/0hd8lWO1urseW8FGSmZNcFkctfU/+5rNZLleeOJ1cjsinvmeXOLKDh4Q+LeelURDKeq7AZohDWOGrgyNNASsVvi0q7DRGHpuX7EUf6GvXS1tgEaCRk5dr8BHQIDAQAB",
   "permissions": ["nativeMessaging"],
   "icons": {
     "16": "icons/shield-16.png",

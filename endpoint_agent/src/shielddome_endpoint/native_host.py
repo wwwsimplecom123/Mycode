@@ -15,7 +15,7 @@ from .native_protocol import (
 
 
 NATIVE_HOST_NAME = "cn.shielddome.endpoint_agent"
-DEVELOPMENT_EXTENSION_ID = "abcdefghijklmnopabcdefghijklmnop"
+DEVELOPMENT_EXTENSION_ID = "hchaloelgnennaojaiikeebhajcoccih"
 DEVELOPMENT_EXTENSION_ORIGIN = (
     f"chrome-extension://{DEVELOPMENT_EXTENSION_ID}/"
 )

@@ -500,12 +500,14 @@ Status: complete
 
 #### Phase 5B：Host 可执行文件、浏览器注册和真实 Edge/Chrome 验收
 
-Status: pending
+Status: in_progress
 
-- 构建 Windows Host 可执行文件并确定正式企业扩展 ID。
-- 生成实际安装路径的 Chrome/Edge Native Host manifests。
-- 实施每浏览器注册、卸载和升级流程。
-- 在真实 chinaccs 邮件详情页完成 Edge/Chrome Native Messaging 验收。
+- 已提交公开 manifest key 并固定开发验收扩展 ID `hchaloelgnennaojaiikeebhajcoccih`；该身份不等于未来商店或企业正式发布身份，仓库不保存私钥。
+- 已提供固定开发依赖的 PyInstaller one-file console Host 构建脚本，输出到被忽略的 `dist/native-host/` 并生成 SHA-256 build metadata；PyInstaller 不进入生产 Wheel。
+- 已提供实际绝对 Host 路径的 Chrome/Edge Native Host manifests 生成，以及当前用户 HKCU 安装、状态、重复安装和自有项卸载脚本。
+- 已通过源码 Host 子进程 ping、最小检测、连续请求隔离、异常帧、stdout 隐私和零 TCP/UDP socket 自动化验证；打包 Host 的同一契约因当前环境没有 PyInstaller/`.exe` 而明确跳过。
+- 已通过隔离 ShieldDome 测试注册表路径的 Chrome/Edge manifest、中文/空格路径、幂等安装/卸载和拒绝删除非自有注册项测试。
+- 仍需在具备批准的离线 PyInstaller 环境构建真实 `.exe`，再执行默认 Chrome/Edge 注册并分别完成真实 chinaccs 在线/断网/Network 面板验收；在这些证据齐全前本阶段保持 `in_progress`。
 
 Phase 5 总完成条件：Phase 5A 与 Phase 5B 均完成，真实浏览器邮件检测全程无网络请求，插件只显示最小结果。Phase 5A 完成后 Phase 5 总状态保持 `in_progress`。
 
@@ -611,4 +613,4 @@ Status: pending
 
 Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔离的 Approved Training Corpus 而有意暂缓，继续保持 `pending`；不得用 Phase 2 合成 fixture 选择正式文本编码模型。Phase 4A 已完成，Phase 4 总状态为 `in_progress`，Phase 4B 继续等待 Phase 3 的正式模型。
 
-Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5 总状态为 `in_progress`；下一步是仍为 `pending` 的 Phase 5B：Host 可执行文件、正式扩展身份、浏览器注册和真实 Edge/Chrome 验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。

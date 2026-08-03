@@ -66,6 +66,8 @@ class WheelBuildTests(unittest.TestCase):
                     any(
                         name.startswith("shielddome_training/")
                         or name.startswith("training/")
+                        or name.startswith("packaging/")
+                        or "pyinstaller" in name.lower()
                         for name in archive_names
                     )
                 )
@@ -77,3 +79,4 @@ class WheelBuildTests(unittest.TestCase):
             self.assertIn("Version: 0.1.0", metadata)
             self.assertIn("Requires-Python: >=3.12", metadata)
             self.assertNotIn("Requires-Dist:", metadata)
+            self.assertNotIn("PyInstaller", metadata)

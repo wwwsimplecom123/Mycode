@@ -1,15 +1,58 @@
+import base64
+import hashlib
 import json
 from pathlib import Path
 import re
+import sys
 import unittest
 
 
 ENDPOINT_ROOT = Path(__file__).resolve().parents[1]
 EXTENSION_ROOT = ENDPOINT_ROOT / "extension"
-DEVELOPMENT_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+DEVELOPMENT_ORIGIN = "chrome-extension://hchaloelgnennaojaiikeebhajcoccih/"
+sys.path.insert(0, str(ENDPOINT_ROOT / "src"))
 
 
 class ExtensionStaticTests(unittest.TestCase):
+    def test_public_key_derives_one_stable_development_identity_everywhere(self):
+        manifest = json.loads((EXTENSION_ROOT / "manifest.json").read_text(encoding="utf-8"))
+        identity = json.loads(
+            (ENDPOINT_ROOT / "native_host" / "identity.json").read_text(encoding="utf-8")
+        )
+        public_key = base64.b64decode(manifest["key"], validate=True)
+        digest = hashlib.sha256(public_key).digest()[:16]
+        derived_id = "".join(chr(ord("a") + nibble) for byte in digest for nibble in (byte >> 4, byte & 15))
+        derived_origin = f"chrome-extension://{derived_id}/"
+
+        from shielddome_endpoint.native_host import (
+            DEVELOPMENT_EXTENSION_ID,
+            DEVELOPMENT_EXTENSION_ORIGIN,
+            NATIVE_HOST_NAME,
+        )
+
+        self.assertEqual(identity["identity_kind"], "development_public_key")
+        self.assertEqual(identity["host_name"], NATIVE_HOST_NAME)
+        self.assertEqual(identity["extension_id"], derived_id)
+        self.assertEqual(identity["extension_origin"], derived_origin)
+        self.assertEqual(DEVELOPMENT_EXTENSION_ID, derived_id)
+        self.assertEqual(DEVELOPMENT_EXTENSION_ORIGIN, derived_origin)
+        self.assertEqual(len(derived_id), 32)
+        self.assertRegex(derived_id, r"^[a-p]{32}$")
+        private_suffixes = {".pem", ".key", ".pfx", ".p12", ".crx"}
+        identity_roots = [EXTENSION_ROOT, ENDPOINT_ROOT / "native_host"]
+        packaging_root = ENDPOINT_ROOT / "packaging"
+        if packaging_root.exists():
+            identity_roots.append(packaging_root)
+        self.assertEqual(
+            [
+                path
+                for root in identity_roots
+                for path in root.rglob("*")
+                if path.is_file() and path.suffix.lower() in private_suffixes
+            ],
+            [],
+        )
+
     def test_manifest_has_exact_mv3_permissions_and_chinaccs_match(self):
         manifest = json.loads((EXTENSION_ROOT / "manifest.json").read_text(encoding="utf-8"))
 

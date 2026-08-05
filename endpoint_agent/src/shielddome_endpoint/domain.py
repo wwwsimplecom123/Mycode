@@ -7,7 +7,7 @@ import re
 MAIL_OBSERVATION_SCHEMA_VERSION = "1.0"
 FEATURE_SCHEMA_VERSION = "2.0"
 MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"
-DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"
+DETECTION_OUTCOME_SCHEMA_VERSION = "3.0"
 
 
 class ModelConfidenceState(StrEnum):
@@ -156,6 +156,9 @@ class StructuredPrivateEvidence:
     model_version: str | None
     feature_schema_version: str
     detection_outcome_schema_version: str
+    example_adjustment: int = 0
+    example_calibration_status: str = "no_examples"
+    example_supporting_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

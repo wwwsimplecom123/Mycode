@@ -5,7 +5,7 @@ from typing import BinaryIO
 import uuid
 
 from .evidence_record import EndpointEvidenceRecord
-from .local_detection import LocalDetectionService
+from .local_detection import LocalDetectionService, default_local_detection_service
 from .native_payload import DetectMailRequest, PingRequest, parse_native_request, to_mail_observation
 from .native_protocol import (
     PROTOCOL_VERSION,
@@ -39,7 +39,9 @@ class NativeHostHandler:
         evidence_store_factory: Callable[[], object] | None = None,
     ) -> None:
         self._extension_origin = extension_origin
-        self._detection_service = detection_service or LocalDetectionService()
+        self._detection_service = (
+            detection_service or default_local_detection_service()
+        )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._event_id_factory = event_id_factory or (
             lambda: f"event-{uuid.uuid4()}"

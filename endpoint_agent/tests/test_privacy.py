@@ -419,7 +419,7 @@ class PrivacyScannerTests(unittest.TestCase):
                 assessment_schema_version=None,
                 model_version=None,
                 feature_schema_version=FEATURE_SCHEMA_VERSION,
-                detection_outcome_schema_version="2.0",
+                detection_outcome_schema_version="3.0",
             ),
             minimal_plugin_projection=(
                 ("local_event_id", "event-privacy-scan"),

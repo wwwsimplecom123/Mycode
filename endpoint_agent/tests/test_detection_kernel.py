@@ -27,12 +27,64 @@ from shielddome_endpoint.domain import (
 from shielddome_endpoint.inference import InferenceContext
 from shielddome_endpoint.inference import UnavailableModelAdapter
 from shielddome_endpoint.privacy import PrivacyScanner
+from shielddome_endpoint.example_calibration import (
+    ExampleCalibration,
+    ExampleCalibrationStatus,
+)
 
 
 DETECTED_AT = datetime(2026, 7, 30, 9, 15, tzinfo=timezone.utc)
 
 
 class DetectionKernelTests(unittest.TestCase):
+    def test_applied_example_calibration_is_private_and_plugin_projection_stays_minimal(self):
+        calibration = ExampleCalibration(
+            status=ExampleCalibrationStatus.EXACT_APPLIED,
+            adjustment=18,
+            supporting_examples=1,
+        )
+
+        outcome = DetectionKernel().detect(
+            make_feature_vector(),
+            (make_rule(score_contribution=20),),
+            local_event_id="event-calibration",
+            detected_at=DETECTED_AT,
+            inference_context=InferenceContext(3_000),
+            example_calibration=calibration,
+        )
+
+        self.assertEqual(outcome.final_risk_score, 38)
+        self.assertEqual(
+            outcome.structured_private_evidence.example_adjustment,
+            18,
+        )
+        self.assertEqual(
+            outcome.structured_private_evidence.example_calibration_status,
+            "exact_applied",
+        )
+        self.assertEqual(
+            outcome.structured_private_evidence.example_supporting_count,
+            1,
+        )
+        self.assertEqual(outcome.schema_version, "3.0")
+        self.assertEqual(
+            tuple(name for name, _ in outcome.minimal_plugin_projection),
+            (
+                "local_event_id",
+                "risk_level",
+                "execution_state",
+                "generic_action",
+            ),
+        )
+        serialized_projection = repr(outcome.minimal_plugin_projection)
+        for forbidden in (
+            "example_adjustment",
+            "similarity",
+            "fingerprint",
+            "supporting_count",
+        ):
+            self.assertNotIn(forbidden, serialized_projection)
+
     def test_success_returns_deterministic_outcome_with_injected_identity_and_time(self):
         adapter = FakeModelAdapter(make_success_assessment())
         kernel = DetectionKernel(adapter)
@@ -338,6 +390,9 @@ class DetectionKernelTests(unittest.TestCase):
                 "model_version",
                 "feature_schema_version",
                 "detection_outcome_schema_version",
+                "example_adjustment",
+                "example_calibration_status",
+                "example_supporting_count",
             ),
         )
         self.assertEqual(
@@ -353,7 +408,7 @@ class DetectionKernelTests(unittest.TestCase):
         self.assertEqual(evidence.rule_evidence[0].evidence_code, "sender_domain_mismatch")
         self.assertEqual(evidence.rule_score, 20)
         self.assertEqual(evidence.feature_schema_version, "2.0")
-        self.assertEqual(evidence.detection_outcome_schema_version, "2.0")
+        self.assertEqual(evidence.detection_outcome_schema_version, "3.0")
         self.assertTrue(scan.safe)
         self.assertEqual(scan.violations, ())
         for private_value in private_values:

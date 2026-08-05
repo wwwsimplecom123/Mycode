@@ -42,7 +42,7 @@ class PackageImportTests(unittest.TestCase):
         self.assertEqual(MAIL_OBSERVATION_SCHEMA_VERSION, "1.0")
         self.assertEqual(FEATURE_SCHEMA_VERSION, "2.0")
         self.assertEqual(MODEL_ASSESSMENT_SCHEMA_VERSION, "1.0")
-        self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "2.0")
+        self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "3.0")
         for public_type in (
             DetectionExecutionState,
             GenericAction,
@@ -171,5 +171,35 @@ class PackageImportTests(unittest.TestCase):
             EvidenceCipher,
             EvidenceStore,
             UserDataKeyManager,
+        ):
+            self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_six_b_example_library_seams(self):
+        from shielddome_endpoint import (
+            CONFIRMED_EXAMPLE_SCHEMA_VERSION,
+            EXAMPLE_APPROXIMATE_MIN_MATCHES,
+            EXAMPLE_APPROXIMATE_SIMILARITY_THRESHOLD,
+            EXAMPLE_LIBRARY_MAX_FINGERPRINTS,
+            ConfirmedExample,
+            ExampleCalibration,
+            ExampleCalibrator,
+            ExampleLabel,
+            ExampleSource,
+            ExampleStore,
+            UserConfirmationAction,
+        )
+
+        self.assertEqual(CONFIRMED_EXAMPLE_SCHEMA_VERSION, "1.0")
+        self.assertEqual(EXAMPLE_LIBRARY_MAX_FINGERPRINTS, 256)
+        self.assertEqual(EXAMPLE_APPROXIMATE_MIN_MATCHES, 3)
+        self.assertEqual(EXAMPLE_APPROXIMATE_SIMILARITY_THRESHOLD, 0.94)
+        for public_type in (
+            ConfirmedExample,
+            ExampleCalibration,
+            ExampleCalibrator,
+            ExampleLabel,
+            ExampleSource,
+            ExampleStore,
+            UserConfirmationAction,
         ):
             self.assertIsNotNone(public_type)

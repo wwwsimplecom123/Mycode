@@ -19,6 +19,10 @@ from shielddome_endpoint.domain import (
     RiskLevel,
 )
 from shielddome_endpoint.risk_fusion import fuse_risk
+from shielddome_endpoint.example_calibration import (
+    ExampleCalibration,
+    ExampleCalibrationStatus,
+)
 
 
 def make_rule(
@@ -312,6 +316,94 @@ class ModelRuleRiskFusionTests(unittest.TestCase):
         self.assertEqual(result.final_risk_score, 90)
         self.assertIs(result.risk_level, RiskLevel.CRITICAL)
         self.assertIs(result.generic_action, GenericAction.CONTACT_SECURITY)
+
+
+class ExampleCalibrationRiskFusionTests(unittest.TestCase):
+    def test_example_adjustments_are_bounded_below_strong_floors_and_below_critical(self):
+        benign = ExampleCalibration(
+            status=ExampleCalibrationStatus.EXACT_APPLIED,
+            adjustment=-8,
+            supporting_examples=1,
+        )
+        phishing = ExampleCalibration(
+            status=ExampleCalibrationStatus.SIMILAR_APPLIED,
+            adjustment=18,
+            supporting_examples=3,
+        )
+        strong_rule = make_rule(
+            category=RuleCategory.ATTACHMENT,
+            severity=RuleSeverity.HIGH,
+            score_contribution=35,
+            strong_evidence=True,
+            evidence_code="attachment_dangerous_extension_present",
+            generic_action=GenericAction.CONTACT_SECURITY,
+        )
+
+        protected = fuse_risk(
+            (strong_rule,),
+            model_assessment=None,
+            execution_state=DetectionExecutionState.RULES_ONLY,
+            example_calibration=benign,
+        )
+        example_only = fuse_risk(
+            (),
+            model_assessment=None,
+            execution_state=DetectionExecutionState.RULES_ONLY,
+            example_calibration=phishing,
+        )
+        threshold_guard = fuse_risk(
+            (make_rule(score_contribution=70),),
+            model_assessment=None,
+            execution_state=DetectionExecutionState.RULES_ONLY,
+            example_calibration=phishing,
+        )
+
+        self.assertEqual(protected.risk_floor, 70)
+        self.assertEqual(protected.final_risk_score, 70)
+        self.assertEqual(protected.example_adjustment, -8)
+        self.assertEqual(example_only.final_risk_score, 18)
+        self.assertIs(example_only.risk_level, RiskLevel.LOW)
+        self.assertEqual(threshold_guard.final_risk_score, 79)
+        self.assertIs(threshold_guard.risk_level, RiskLevel.HIGH)
+
+    def test_benign_examples_cannot_cancel_auth_url_blacklist_or_attachment_floors(self):
+        benign = ExampleCalibration(
+            status=ExampleCalibrationStatus.SIMILAR_APPLIED,
+            adjustment=-8,
+            supporting_examples=3,
+        )
+        cases = (
+            (RuleCategory.AUTHENTICATION, "authentication_failure"),
+            (RuleCategory.LINK, "dangerous_url"),
+            (RuleCategory.POLICY, "blacklist_match"),
+            (RuleCategory.ATTACHMENT, "dangerous_attachment"),
+        )
+
+        for category, code in cases:
+            with self.subTest(category=category):
+                result = fuse_risk(
+                    (
+                        make_rule(
+                            rule_id=code,
+                            category=category,
+                            severity=RuleSeverity.HIGH,
+                            score_contribution=1,
+                            strong_evidence=True,
+                            evidence_code=code,
+                            generic_action=GenericAction.CONTACT_SECURITY,
+                        ),
+                    ),
+                    model_assessment=None,
+                    execution_state=DetectionExecutionState.RULES_ONLY,
+                    example_calibration=benign,
+                )
+
+                self.assertEqual(result.risk_floor, 70)
+                self.assertEqual(result.final_risk_score, 70)
+                self.assertIs(
+                    result.generic_action,
+                    GenericAction.CONTACT_SECURITY,
+                )
 
 
 if __name__ == "__main__":

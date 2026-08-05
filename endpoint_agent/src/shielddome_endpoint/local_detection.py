@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from .detection_kernel import DetectionKernel
+from .example_calibration import ExampleCalibration, ExampleCalibrator
 from .domain import (
     MAIL_OBSERVATION_SCHEMA_VERSION,
     DetectionOutcome,
@@ -59,11 +60,17 @@ def _validate_observation(observation: MailObservation) -> None:
 
 
 class LocalDetectionService:
-    def __init__(self, inference: LocalInference | None = None) -> None:
+    def __init__(
+        self,
+        inference: LocalInference | None = None,
+        *,
+        example_calibrator: ExampleCalibrator | None = None,
+    ) -> None:
         adapter = inference if inference is not None else UnavailableModelAdapter()
         self._feature_pipeline = FeaturePipeline()
         self._rule_evaluator = LocalRuleEvaluator()
         self._kernel = DetectionKernel(adapter)
+        self._example_calibrator = example_calibrator
 
     def detect(
         self,
@@ -75,13 +82,37 @@ class LocalDetectionService:
         _validate_observation(observation)
         features = self._feature_pipeline.transform(observation)
         rules = self._rule_evaluator.evaluate(features)
+        calibration = None
+        if self._example_calibrator is not None:
+            try:
+                candidate = self._example_calibrator.calibrate(features)
+                calibration = (
+                    candidate
+                    if isinstance(candidate, ExampleCalibration)
+                    else ExampleCalibration.failed()
+                )
+            except Exception:
+                calibration = ExampleCalibration.failed()
         return self._kernel.detect(
             features,
             rules,
             local_event_id=local_event_id,
             detected_at=observed_now,
             inference_context=InferenceContext(LOCAL_INFERENCE_BUDGET_MS),
+            example_calibration=calibration,
         )
 
 
-__all__ = ["LOCAL_INFERENCE_BUDGET_MS", "LocalDetectionService"]
+def default_local_detection_service() -> LocalDetectionService:
+    from .example_store import ExampleStore
+
+    return LocalDetectionService(
+        example_calibrator=ExampleCalibrator(ExampleStore())
+    )
+
+
+__all__ = [
+    "LOCAL_INFERENCE_BUDGET_MS",
+    "LocalDetectionService",
+    "default_local_detection_service",
+]

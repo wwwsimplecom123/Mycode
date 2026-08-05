@@ -142,3 +142,31 @@ class OfflineConstraintTests(unittest.TestCase):
                 self.assertIsNone(re.search(pattern, sources, re.IGNORECASE))
         self.assertIn("--no-index", sources)
         self.assertNotIn("print(", (ENDPOINT_ROOT / "packaging" / "native_host_entry.py").read_text(encoding="utf-8"))
+
+    def test_phase_six_b_has_no_network_listener_upload_or_model_training_code(self):
+        sources = "\n".join(
+            (ENDPOINT_ROOT / "src" / "shielddome_endpoint" / filename).read_text(
+                encoding="utf-8"
+            )
+            for filename in (
+                "confirmed_examples.py",
+                "example_store.py",
+                "example_calibration.py",
+            )
+        ).casefold()
+
+        for forbidden in (
+            "import socket",
+            ".bind(",
+            ".listen(",
+            "requests.",
+            "urllib.",
+            "http://",
+            "https://",
+            ".partial_fit(",
+            ".fit(",
+            ".train(",
+            "upload",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, sources)

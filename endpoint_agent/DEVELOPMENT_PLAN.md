@@ -452,7 +452,7 @@ Status: complete
 - 已实现 `DetectionKernel.detect(...)` 作为完整检测结果的唯一编排入口，覆盖拒判、模型不可用、超时、错误、adapter 异常、非法输出和主动纯规则模式。
 - 已实现只含四个允许字段的插件投影，以及不含邮件原文、完整地址、URL query、Token、密码和私有路径的内存私密证据投影。
 - 已实现 Model Assessment schema/概率/状态/模型版本/Feature Schema/耗时/error code 校验；非法输出安全降级，不阻断规则结果。
-- `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`；`FEATURE_SCHEMA_VERSION = "2.0"` 与 `CORPUS_SCHEMA_VERSION = "3.0"` 保持不变。
+- Phase 4A 首次引入 `DETECTION_OUTCOME_SCHEMA_VERSION = "2.0"`；Phase 6B 为私密样本校准摘要把当前版本提升为 `3.0`，`FEATURE_SCHEMA_VERSION = "2.0"` 与 `CORPUS_SCHEMA_VERSION = "3.0"` 保持不变。
 - Phase 4A 没有生产模型，因此只通过测试 fake 模拟耗时、超时和异常；没有声称完成真实 3 秒推理验证。
 
 #### Phase 4A.1：本地规则评估与端到端 Local Detection Service
@@ -532,13 +532,16 @@ Status: complete
 
 #### Phase 6B：Confirmed Example Library 与有限校准
 
-Status: pending
+Status: complete
 
-- 实现每用户 Confirmed Example Library。
-- 只保存脱敏特征、向量、人工标签、来源摘要和内容哈希。
-- 实现不能抵消强规则证据的有限相似样本校准。
-
-本阶段未在 Phase 6A 中实现。
+- 已实现只允许明确“确认正常/确认钓鱼”动作写入的每用户 Confirmed Example Library；检测、低风险邮件、邮箱和证据记录不会自动入库。
+- 已实现严格不可变样本契约，只含脱敏 FeatureVector、Feature/Example schema、人工标签、固定来源枚举、带时区确认时间和本地密钥 HMAC-SHA-256 fingerprint；没有主题、正文、地址、完整 URL、附件内容/名称、source message ID 或 `.eml` 字段。
+- 已在 `%LOCALAPPDATA%\ShieldDome\EndpointAgent\examples` 使用独立当前用户 DPAPI 保护的随机 256 位密钥、逐记录 AES-256-GCM 和认证索引；跨用户作用域、损坏密钥、密文/标签/索引篡改均安全失败。
+- 已实现 256 个唯一 fingerprint 容量、最多 50 条分页、标签筛选、同标签去重、冲突标签保留、删除单条、清空数据库/sidecar/独立密钥，以及最多 512 个加密行的校准扫描上限。
+- 已实现一条无冲突精确样本可校准；近似匹配要求相似度至少 `0.94`、至少三条不同 fingerprint 的一致标签且不存在冲突。低相似度、样本不足和任何冲突均返回零调整。
+- 正常/钓鱼样本调整分别固定为 `-8/+18`；正常样本不能降低认证、危险 URL、黑名单/策略、危险附件等强规则下限，样本证据不能单独把结果推为 `critical`。
+- 校准异常不阻断规则/模型检测；Native Host 只组合默认本地校准器，没有新增确认协议，插件仍只显示四字段结果且不含样本、相似度、规则或内部原因。
+- 已验证无网络连接、无监听端口、无上传、无模型训练或模型权重修改。
 
 #### Phase 6C：脱敏诊断包导出
 
@@ -643,4 +646,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已保守拆分为 6A、6B 和 6C。Phase 6A 已完成当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6 总状态保持 `in_progress`。Confirmed Example Library/有限校准仍属于 Phase 6B，脱敏诊断包仍属于 Phase 6C，两者均为 `pending`，不得把 Phase 6A 的证据存储解释为已经实现后续能力。
+Phase 6 已保守拆分为 6A、6B 和 6C。Phase 6A 已完成当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6B 已完成显式确认样本库与有限校准；Phase 6 总状态继续保持 `in_progress`。脱敏诊断包仍属于 Phase 6C 并保持 `pending`，不得把 Phase 6A/6B 的本地存储与校准能力解释为已经实现 Phase 6C 或 Phase 7。

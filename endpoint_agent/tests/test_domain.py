@@ -147,7 +147,7 @@ class DetectionOutcomeTests(unittest.TestCase):
             assessment_schema_version=None,
             model_version=None,
             feature_schema_version="2.0",
-            detection_outcome_schema_version="2.0",
+            detection_outcome_schema_version="3.0",
         )
         outcome = DetectionOutcome(
             local_event_id="event-001",
@@ -179,8 +179,8 @@ class DetectionOutcomeTests(unittest.TestCase):
                 "schema_version",
             ],
         )
-        self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "2.0")
-        self.assertEqual(outcome.schema_version, "2.0")
+        self.assertEqual(DETECTION_OUTCOME_SCHEMA_VERSION, "3.0")
+        self.assertEqual(outcome.schema_version, "3.0")
         with self.assertRaises(FrozenInstanceError):
             outcome.risk_level = "low"
 

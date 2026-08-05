@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import inspect
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 
 
@@ -45,6 +46,82 @@ def make_observation(**changes) -> MailObservation:
 
 
 class LocalDetectionServiceTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows DPAPI integration")
+    def test_explicit_example_calibration_is_applied_through_detection_service(self):
+        from shielddome_endpoint.confirmed_examples import (
+            ExampleSource,
+            UserConfirmationAction,
+        )
+        from shielddome_endpoint.example_calibration import ExampleCalibrator
+        from shielddome_endpoint.example_store import ExampleStore
+        from shielddome_endpoint.feature_pipeline import FeaturePipeline
+
+        observation = make_observation()
+        with TemporaryDirectory() as temporary_directory:
+            store = ExampleStore(Path(temporary_directory))
+            store.confirm(
+                FeaturePipeline().transform(observation),
+                action=UserConfirmationAction.CONFIRM_PHISHING,
+                source=ExampleSource.BROWSER_NATIVE,
+                confirmed_at=OBSERVED_NOW,
+            )
+            outcome = LocalDetectionService(
+                example_calibrator=ExampleCalibrator(store)
+            ).detect(
+                observation,
+                local_event_id="event-explicit-calibration",
+                observed_now=OBSERVED_NOW,
+            )
+
+        self.assertEqual(outcome.final_risk_score, 18)
+        self.assertEqual(
+            outcome.structured_private_evidence.example_calibration_status,
+            "exact_applied",
+        )
+        self.assertEqual(
+            outcome.structured_private_evidence.example_adjustment,
+            18,
+        )
+
+    def test_calibration_failure_does_not_block_or_change_rule_detection(self):
+        class FailingCalibrator:
+            def calibrate(self, _feature_vector):
+                raise RuntimeError(
+                    "private sample similarity fingerprint internal reason"
+                )
+
+        baseline = LocalDetectionService().detect(
+            make_observation(reply_to="other@outside.test"),
+            local_event_id="event-calibration-failure",
+            observed_now=OBSERVED_NOW,
+        )
+        outcome = LocalDetectionService(
+            example_calibrator=FailingCalibrator()
+        ).detect(
+            make_observation(reply_to="other@outside.test"),
+            local_event_id="event-calibration-failure",
+            observed_now=OBSERVED_NOW,
+        )
+
+        self.assertEqual(outcome.final_risk_score, baseline.final_risk_score)
+        self.assertEqual(outcome.risk_level, baseline.risk_level)
+        self.assertEqual(outcome.execution_state, baseline.execution_state)
+        self.assertEqual(
+            outcome.structured_private_evidence.example_calibration_status,
+            "failed",
+        )
+        self.assertEqual(
+            outcome.structured_private_evidence.example_adjustment,
+            0,
+        )
+        for forbidden in (
+            "private sample",
+            "similarity",
+            "fingerprint",
+            "internal reason",
+        ):
+            self.assertNotIn(forbidden, repr(outcome))
+
     def test_observation_is_transformed_and_rules_are_generated_locally(self):
         outcome = LocalDetectionService().detect(
             make_observation(reply_to="other@outside.test"),

@@ -4,9 +4,9 @@ This directory contains the design and, later, the implementation of the standal
 
 ## Current Implementation Status
 
-Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 is `in_progress`: Phase 6A encrypted evidence storage is complete, while Phase 6B Confirmed Example Library/calibration and Phase 6C sanitized diagnostics export remain pending.
+Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 is `in_progress`: Phase 6A encrypted evidence storage and Phase 6B Confirmed Example Library/bounded calibration are complete, while Phase 6C sanitized diagnostics export remains pending.
 
-The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. Phase 6A adds a strict Endpoint Evidence Record, current-user `%LOCALAPPDATA%` storage, a random DPAPI-protected data key, per-record AES-256-GCM, minimal SQLite indexes, fifteen-day cleanup, and explicit all-data deletion. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only. With no model adapter, detection still returns the deterministic rule result, and evidence storage failure does not block that result. Phase 5B now supplies a public-key-derived stable development extension ID, a pinned development-only PyInstaller build command, SHA-256 build metadata, and safe current-user Chrome/Edge install/check/uninstall scripts. This environment has no offline PyInstaller, so no Host executable was built, no default browser registration was written, and real Chrome/Edge acceptance remains outstanding. There is still no production ONNX Runtime adapter or formal model in this repository.
+The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. Phase 6A adds a strict Endpoint Evidence Record, current-user `%LOCALAPPDATA%` storage, a random DPAPI-protected data key, per-record AES-256-GCM, minimal SQLite indexes, fifteen-day cleanup, and explicit all-data deletion. Phase 6B adds an explicit-confirmation-only per-user example library, a separate DPAPI-protected random key, AES-256-GCM records, per-user HMAC fingerprints, conflict-aware bounded queries, and conservative exact/approximate calibration that cannot cancel strong rules or create critical risk alone. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only; it cannot add samples and still displays only the four-field projection. With no model adapter or when calibration/storage fails, detection still returns the deterministic rule result. Phase 5B now supplies a public-key-derived stable development extension ID, a pinned development-only PyInstaller build command, SHA-256 build metadata, and safe current-user Chrome/Edge install/check/uninstall scripts. This environment has no offline PyInstaller, so no Host executable was built, no default browser registration was written, and real Chrome/Edge acceptance remains outstanding. There is still no production ONNX Runtime adapter or formal model in this repository.
 
 ## Product Definition
 
@@ -125,6 +125,8 @@ Risk Fusion combines deterministic evidence, Model Assessment, and bounded simil
 - Uncertain model output adds no strong risk evidence.
 - Similar benign examples have a bounded protective effect.
 - Similar phishing examples have a bounded risk effect.
+- One unconflicted exact confirmation may calibrate; approximate calibration requires at least three distinct consistent fingerprints at similarity 0.94 or above and rejects every qualifying conflict.
+- Benign and phishing example adjustments are fixed at -8 and +18; example evidence alone cannot create a critical result.
 - Strong authentication, blacklist, URL and attachment-metadata evidence cannot be cancelled by similarity.
 - Model failure always degrades to deterministic rules.
 - Duplicate rule IDs contribute once using a stable conservative selection.
@@ -149,7 +151,13 @@ Risk Fusion combines deterministic evidence, Model Assessment, and bounded simil
 
 ### Confirmed Example Library
 
-The library stores only sanitized features, vectors, labels and hashes for user-confirmed examples. It calibrates similar future email with bounded evidence and never changes model weights.
+The library admits data only through an explicit `confirm_benign` or `confirm_phishing` action. It stores only a strict sanitized Feature Schema 2.0 vector, schema versions, human label, fixed source enum, aware time, and a per-user HMAC-SHA-256 fingerprint; it has no field for subject, body, address, full URL, attachment content/name, source message ID, or `.eml`.
+
+- Storage is isolated under `%LOCALAPPDATA%\ShieldDome\EndpointAgent\examples` with a separate current-user DPAPI-protected 256-bit key and per-row AES-256-GCM.
+- Capacity is 256 distinct fingerprints; page size is at most 50 and calibration scans at most 512 encrypted rows.
+- Same-label repeats deduplicate. Opposite labels for one fingerprint are retained as a visible conflict and never calibrate.
+- One exact label or three consistent near labels may apply `-8` benign protection or `+18` phishing risk. Low similarity, insufficient support, conflicts, invalid vectors, and storage failures apply zero.
+- The library never trains or changes a model, uploads a sample, reads a mailbox automatically, or exposes sample content/similarity/internal reasons to the browser extension.
 
 ### Endpoint Release
 

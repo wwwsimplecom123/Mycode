@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**，以及 **Phase 6A：加密证据存储、15 天留存与全部删除**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6 总状态为 `in_progress`、Phase 6B/6C 均为 `pending`。当前提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、**Phase 6A：加密证据存储、15 天留存与全部删除**，以及 **Phase 6B：Confirmed Example Library 与有限相似样本校准**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6 总状态为 `in_progress`、Phase 6B 为 `complete`、Phase 6C 为 `pending`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -33,8 +33,13 @@
 - 使用 `cryptography==49.0.0` AESGCM 的逐记录 AES-256-GCM、最小 SQLite 索引、按事件读取和稳定分页；
 - 精确 15 天清理、Native Host 检测时自动触发过期清理、SQLite/WAL 处理和全部本地证据数据删除；
 - 密文/标签/密钥/schema 损坏安全失败、数据库原文缺失和存储失败不阻断检测结果。
+- 只允许用户明确“确认正常/确认钓鱼”写入的 Confirmed Example 契约，禁止检测或低风险结果自动入库；
+- 当前 Windows 用户独立 DPAPI 密钥、AES-256-GCM 记录加密和本地密钥 HMAC-SHA-256 fingerprint；
+- 256 个唯一 fingerprint 容量上限、50 条分页上限、标签筛选、去重、冲突保留、单条删除和清空；
+- 精确重复单样本与至少 3 条、相似度至少 0.94 的一致近似样本校准，冲突/低相似度/证据不足均拒绝；
+- 正常样本最多减 8 分且不得突破强规则风险下限，钓鱼样本最多加 18 分且不能单独产生 `critical`；校准失败保留规则结果。
 
-生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam，以及 Phase 6A 加密证据存储。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型或提供桌面 UI；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam、Phase 6A 加密证据存储，以及 Phase 6B 明确确认样本库与有限校准。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型或提供桌面 UI；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
 
 ## 2. 环境要求
 
@@ -43,7 +48,7 @@
 - Git，可执行 `git check-ignore`；
 - 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-生产 Wheel 的唯一第三方运行时依赖是固定 `cryptography==49.0.0`，用于 Phase 6A AES-256-GCM。构建和部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖；`pip wheel --no-index --no-deps` 只构建 ShieldDome Wheel，不会下载或封装该依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
+生产 Wheel 的唯一第三方运行时依赖是固定 `cryptography==49.0.0`，用于 Phase 6A/6B AES-256-GCM。构建和部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖；`pip wheel --no-index --no-deps` 只构建 ShieldDome Wheel，不会下载或封装该依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
 
 ## 3. 目录概览
 
@@ -75,6 +80,9 @@ endpoint_agent/
     key_protection.py               当前用户 SID/DPAPI 与随机数据密钥生命周期
     evidence_crypto.py              AES-256-GCM 逐记录加解密和认证失败处理
     evidence_store.py               每用户 SQLite、读取、分页、留存与全部删除
+    confirmed_examples.py           严格确认样本契约与 keyed fingerprint
+    example_store.py                每用户加密样本库与容量/查询上限
+    example_calibration.py          精确/近似样本的保守校准
     feature_pipeline.py             确定性特征转换
     corpus.py                       Corpus Governance 深模块
     privacy.py                      candidate/FeatureVector/manifest 隐私扫描
@@ -86,6 +94,9 @@ endpoint_agent/
     test_risk_fusion.py             规则/模型融合与强证据下限
     test_detection_kernel.py        Kernel、降级和投影边界
     test_offline_constraints.py     离线边界
+    test_confirmed_examples.py      样本契约、字段白名单与 fingerprint
+    test_example_store.py           用户隔离、加密、CRUD、去重与容量
+    test_example_calibration.py     校准阈值、冲突与证据不足
     test_repository_hygiene.py      Git 忽略规则
     test_native_protocol.py         framing、UTF-8/JSON 与资源边界
     test_native_payload.py          payload 白名单、注入拒绝与长度边界
@@ -241,12 +252,14 @@ outcome = DetectionKernel(UnavailableModelAdapter()).detect(
 - 相同 rule ID 只计分一次，并按与输入顺序无关的保守顺序选择；
 - strong low/medium/high/critical 分别建立 20/40/70/90 风险下限；
 - confident phishing 最多增加 25 分，confident benign 最多减少 5 分且不能低于强规则下限；
+- 已通过冲突门禁的正常/钓鱼样本分别固定调整 -8/+18 分，任何异常都按 0 分降级；
+- 正常样本调整不得低于强规则下限；样本校准前低于 80 分时，不得仅靠钓鱼样本进入 `critical`；
 - uncertain 和全部故障/规则模式不产生模型调整；无规则的 uncertain 仍给出 `verify_sender`，不投影为安全放行；
 - 最终分数限制为 0–100，0–24/25–49/50–79/80–100 分别映射 low/medium/high/critical。
 
-`minimal_plugin_projection` 的允许字段精确为 `local_event_id`、`risk_level`、`execution_state` 和 `generic_action`。`structured_private_evidence` 只包含稳定 evidence code/类别/状态、分数组成、执行/降级状态和版本摘要；两者都不包含正文、完整地址、URL query、Token、密码或私有路径。本阶段结果只存在于内存，不落盘。
+`minimal_plugin_projection` 的允许字段精确为 `local_event_id`、`risk_level`、`execution_state` 和 `generic_action`。`structured_private_evidence` 只包含稳定 evidence code/类别/状态、分数组成、执行/降级状态、样本调整/稳定状态/支持数和版本摘要；两者都不包含样本内容、相似度、fingerprint、内部规则原因、正文、完整地址、URL query、Token、密码或私有路径。
 
-`MODEL_ASSESSMENT_SCHEMA_VERSION` 为 `1.0`，`DETECTION_OUTCOME_SCHEMA_VERSION` 为 `2.0`；Feature Schema 继续为 `2.0`，Corpus Schema 继续为 `3.0`。
+`MODEL_ASSESSMENT_SCHEMA_VERSION` 为 `1.0`，`DETECTION_OUTCOME_SCHEMA_VERSION` 为 `3.0`；Feature Schema 继续为 `2.0`，Corpus Schema 继续为 `3.0`。
 
 ## 7. Local Evidence Store
 
@@ -311,6 +324,44 @@ authentication_tag
 留存边界是 `expires_at <= now`；`now` 和默认 clock 都可注入测试。Native Host 每次成功检测后先尽力触发过期清理，再尽力写入当前记录。清理使用 SQLite `secure_delete` 和 WAL checkpoint/truncate；全部删除还执行 VACUUM，关闭连接，覆写后删除自有 database/WAL/SHM/journal/temp 与 DPAPI 保护密钥。覆写不替代底层存储介质保证，删除保护密钥同时提供密码学销毁边界。
 
 存储初始化、清理、投影或写入失败都不会阻断现有检测结果；Native Host 仍只返回 `local_event_id`、`risk_level`、`execution_state` 和 `generic_action`。
+
+### 7.1 Confirmed Example Library
+
+Phase 6B 只接受本地用户明确确认，不存在检测结果自动入库入口：
+
+```python
+from datetime import datetime, timezone
+
+from shielddome_endpoint import (
+    ExampleSource,
+    ExampleStore,
+    UserConfirmationAction,
+)
+
+
+examples = ExampleStore()
+status = examples.confirm(
+    vector,
+    action=UserConfirmationAction.CONFIRM_PHISHING,
+    source=ExampleSource.BROWSER_NATIVE,
+    confirmed_at=datetime.now(timezone.utc),
+)
+page = examples.list_page(offset=0, limit=50)
+```
+
+样本目录与 Phase 6A 证据库分离：
+
+```text
+%LOCALAPPDATA%\ShieldDome\EndpointAgent\examples\
+  keys\evidence.key
+  data\confirmed_examples.sqlite3
+```
+
+样本记录仅含严格验证的脱敏 `FeatureVector`、Feature/Example schema、人工标签、来源枚举、UTC 确认时间和本地密钥 HMAC-SHA-256 fingerprint。主题、正文、地址、完整 URL、附件或 `.eml` 没有字段；未知字段、未知枚举、超长输入和非规范特征均被拒绝。fingerprint 由每用户的 32 字节数据密钥 HMAC 生成，不可用于跨用户关联。
+
+存储限制为 256 个唯一 fingerprint，单页最多 50 条、offset 最大 256，校准最多扫描 512 行。同 fingerprint/同标签返回 `duplicate`；相反标签被保留为 `conflict`，不会静默覆盖，也不参与校准。`delete(fingerprint, label)` 删除单条，`clear()` 清空数据库/侧车文件并删除该样本库的 DPAPI 保护密钥。
+
+有限校准仅有两条应用路径：精确 fingerprint 匹配可使用 1 条无冲突人工样本；近似匹配要求至少 3 个不同 fingerprint、相似度至少 0.94、标签一致且不存在冲突。相似度只在本地内存计算，不保存也不投影给插件。该功能不训练模型、不修改权重、不上传样本、不使用网络或监听端口。
 
 ## 8. Corpus Governance
 
@@ -461,7 +512,7 @@ rule_result = scanner.scan_rule_assessments(rules)
 python -m unittest discover -s endpoint_agent/tests -v
 ```
 
-当前无打包 Host 的开发环境完整 Endpoint Agent 回归应运行 176 项测试：175 项通过，打包 Host 契约因 `.exe` 不存在明确跳过 1 项；不得把该跳过解释为 Phase 5B 已完成。具备有效 `.exe` 后，打包 Host 契约必须运行且不再跳过，命令仍须以退出码 0 结束且没有 failure 或 error。
+当前无打包 Host 的开发环境完整 Endpoint Agent 回归应运行 201 项测试：200 项通过，打包 Host 契约因 `.exe` 不存在明确跳过 1 项；不得把该跳过解释为 Phase 5B 已完成。具备有效 `.exe` 后，打包 Host 契约必须运行且不再跳过，命令仍须以退出码 0 结束且没有 failure 或 error。
 
 运行 Phase 6A 单个测试模块：
 
@@ -469,6 +520,14 @@ python -m unittest discover -s endpoint_agent/tests -v
 python -m unittest discover -s endpoint_agent/tests -p "test_key_protection.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_evidence_crypto.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_evidence_store.py" -v
+```
+
+运行 Phase 6B 单个测试模块：
+
+```powershell
+python -m unittest discover -s endpoint_agent/tests -p "test_confirmed_examples.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_example_store.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_example_calibration.py" -v
 ```
 
 运行 Phase 1 单个测试模块：
@@ -566,11 +625,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- Phase 6B Confirmed Example Library 与有限校准；
 - Phase 6C 脱敏诊断包导出；
 - 托盘、控制台、`.eml` 或邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A 已完成，但 Phase 6 总状态因 6B/6C 未实现而保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A 和 Phase 6B 已完成，但 Phase 6 总状态因 Phase 6C 未实现而保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 14. 修改后的最低验证
 
@@ -579,6 +637,9 @@ python -m unittest discover -s endpoint_agent/tests -v
 python -m unittest discover -s endpoint_agent/tests -p "test_key_protection.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_evidence_crypto.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_evidence_store.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_confirmed_examples.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_example_store.py" -v
+python -m unittest discover -s endpoint_agent/tests -p "test_example_calibration.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_protocol.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_payload.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_native_host.py" -v
@@ -587,7 +648,7 @@ python -m unittest discover -s endpoint_agent/tests -p "test_native_packaging.py
 node --check endpoint_agent/extension/background.js
 node --check endpoint_agent/extension/content.js
 node --check endpoint_agent/extension/adapters/chinaccs.js
-python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase6a
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase6b
 git status --short
 git diff --stat
 git diff -- endpoint_agent

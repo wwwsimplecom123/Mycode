@@ -1,5 +1,13 @@
 from dataclasses import dataclass
 
+from .example_calibration import (
+    EXAMPLE_APPROXIMATE_MIN_MATCHES,
+    EXAMPLE_BENIGN_ADJUSTMENT,
+    EXAMPLE_PHISHING_ADJUSTMENT,
+    ExampleCalibration,
+    ExampleCalibrationStatus,
+)
+
 from .domain import (
     DetectionExecutionState,
     GenericAction,
@@ -19,6 +27,7 @@ class RiskFusionResult:
     generic_action: GenericAction
     rule_score: int
     model_adjustment: int
+    example_adjustment: int
     risk_floor: int
     has_strong_evidence: bool
     rule_assessments: tuple[RuleAssessment, ...]
@@ -85,6 +94,7 @@ def fuse_risk(
     *,
     model_assessment: ModelAssessment | None,
     execution_state: DetectionExecutionState,
+    example_calibration: ExampleCalibration | None = None,
 ) -> RiskFusionResult:
     ordered_rules = _deduplicate_rules(rule_assessments)
     rule_score = min(100, sum(item.score_contribution for item in ordered_rules))
@@ -116,7 +126,34 @@ def fuse_risk(
     adjusted_score = max(0, min(100, rule_score + model_adjustment))
     if model_adjustment > 0 and rule_score < 80 and adjusted_score >= 80:
         adjusted_score = 79
-    final_score = max(adjusted_score, risk_floor)
+    pre_example_score = max(adjusted_score, risk_floor)
+    example_adjustment = 0
+    if isinstance(example_calibration, ExampleCalibration):
+        if (
+            example_calibration.status
+            is ExampleCalibrationStatus.EXACT_APPLIED
+            and example_calibration.supporting_examples == 1
+            and example_calibration.adjustment
+            in {EXAMPLE_BENIGN_ADJUSTMENT, EXAMPLE_PHISHING_ADJUSTMENT}
+        ) or (
+            example_calibration.status
+            is ExampleCalibrationStatus.SIMILAR_APPLIED
+            and example_calibration.supporting_examples
+            >= EXAMPLE_APPROXIMATE_MIN_MATCHES
+            and example_calibration.adjustment
+            in {EXAMPLE_BENIGN_ADJUSTMENT, EXAMPLE_PHISHING_ADJUSTMENT}
+        ):
+            example_adjustment = example_calibration.adjustment
+    final_score = max(
+        risk_floor,
+        min(100, max(0, pre_example_score + example_adjustment)),
+    )
+    if (
+        example_adjustment > 0
+        and pre_example_score < 80
+        and final_score >= 80
+    ):
+        final_score = 79
     action = max(
         (item.generic_action for item in ordered_rules),
         key=lambda item: _ACTION_PRIORITY[item],
@@ -124,6 +161,7 @@ def fuse_risk(
     )
     if (
         model_adjustment > 0
+        or example_adjustment > 0
         or execution_state is DetectionExecutionState.MODEL_UNCERTAIN
     ) and action is GenericAction.CONTINUE:
         action = GenericAction.VERIFY_SENDER
@@ -133,6 +171,7 @@ def fuse_risk(
         generic_action=action,
         rule_score=rule_score,
         model_adjustment=model_adjustment,
+        example_adjustment=example_adjustment,
         risk_floor=risk_floor,
         has_strong_evidence=bool(strong_rules),
         rule_assessments=ordered_rules,

@@ -17,6 +17,7 @@ from .inference import (
     ValidatedModelAssessment,
     validate_model_assessment,
 )
+from .example_calibration import ExampleCalibration
 from .risk_fusion import RiskFusionResult, fuse_risk
 
 
@@ -49,6 +50,7 @@ class DetectionKernel:
         local_event_id: str,
         detected_at: datetime,
         inference_context: InferenceContext,
+        example_calibration: ExampleCalibration | None = None,
     ) -> DetectionOutcome:
         if (
             not isinstance(local_event_id, str)
@@ -90,6 +92,7 @@ class DetectionKernel:
             rule_assessments,
             model_assessment=validated.assessment,
             execution_state=validated.execution_state,
+            example_calibration=example_calibration,
         )
         assessment = validated.assessment
         fallback_model_status = {
@@ -127,6 +130,17 @@ class DetectionKernel:
             ),
             feature_schema_version=feature_vector.schema_version,
             detection_outcome_schema_version=DETECTION_OUTCOME_SCHEMA_VERSION,
+            example_adjustment=fusion.example_adjustment,
+            example_calibration_status=(
+                example_calibration.status.value
+                if isinstance(example_calibration, ExampleCalibration)
+                else "no_examples"
+            ),
+            example_supporting_count=(
+                example_calibration.supporting_examples
+                if isinstance(example_calibration, ExampleCalibration)
+                else 0
+            ),
         )
         return DetectionOutcome(
             local_event_id=local_event_id,

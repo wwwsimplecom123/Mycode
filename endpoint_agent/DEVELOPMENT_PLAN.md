@@ -513,7 +513,7 @@ Phase 5 总完成条件：Phase 5A 与 Phase 5B 均完成，真实浏览器邮�
 
 ### Phase 6：加密存储、样本库和留存
 
-Status: in_progress
+Status: complete
 
 #### Phase 6A：加密证据存储、15 天留存、全部删除
 
@@ -545,14 +545,17 @@ Status: complete
 
 #### Phase 6C：脱敏诊断包导出
 
-Status: pending
+Status: complete
 
-- 仅在用户明确操作时导出一次性脱敏诊断包。
-- 诊断包不得包含邮件原文、密钥、nonce、密文、认证标签或私有路径。
+- 已实现 `DiagnosticExporter.export(output_path, confirmed=True, overwrite=False)`；调用方必须明确选择输出路径并确认，默认拒绝覆盖，覆盖需要第二个显式参数。
+- 已实现固定 `diagnostics.json`、`compatibility.json`、`manifest.json` 白名单、相对单段归档名、逐 payload 大小/SHA-256 manifest 和归档完成后复核。
+- 已实现最近 15 天日期/风险/来源、规则模式、模型可用/拒判/降级、稳定错误码、Evidence Store/Confirmed Example Library 健康，以及样本/标签/冲突的聚合统计。
+- 已限制 4,096 条证据、512 行样本、32 种来源、32 种错误码、单文件 256 KiB 和归档 1 MiB；超限安全失败且不截断成误导性结果。
+- 已验证邮件原文、地址、URL/query、附件、FeatureVector、fingerprint、数据库/sidecar、密钥、nonce、认证标签、密文、用户/主机/路径/环境、模型原因、规则权重、异常文本和堆栈均不进入归档。
+- 已使用当前用户目录内的临时构建目录并在成功/失败后清理；安全发布失败不破坏已有诊断包、证据库、样本库或正常检测。
+- 诊断导出不定时运行、不自动上传、不进入训练/样本库、不连接网络，也不接入 Native Messaging 或浏览器插件。
 
-本阶段未在 Phase 6A 中实现。
-
-Phase 6 总完成条件：Phase 6A、Phase 6B 与 Phase 6C 全部完成，原文不落盘，越权 Windows 用户不能读取本地记录，清理、有限校准和诊断导出隐私测试全部通过。Phase 6A 完成后 Phase 6 总状态保持 `in_progress`。
+Phase 6 总完成条件已满足：Phase 6A、Phase 6B 与 Phase 6C 全部完成，原文不落盘，越权 Windows 用户不能读取本地记录或聚合数据，清理、有限校准和诊断导出隐私测试均已通过。
 
 ### Phase 7：托盘、个人控制台和数据看板
 
@@ -646,4 +649,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已保守拆分为 6A、6B 和 6C。Phase 6A 已完成当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6B 已完成显式确认样本库与有限校准；Phase 6 总状态继续保持 `in_progress`。脱敏诊断包仍属于 Phase 6C 并保持 `pending`，不得把 Phase 6A/6B 的本地存储与校准能力解释为已经实现 Phase 6C 或 Phase 7。
+Phase 6 已完成：Phase 6A 提供当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6B 提供显式确认样本库与有限校准；Phase 6C 提供显式确认、用户选路、默认不覆盖的一次性脱敏诊断包。下一实施阶段更新为 Phase 7，但 Phase 7 仍为 `pending`，本次没有实现托盘、控制台、数据看板或 `.eml` 接入。

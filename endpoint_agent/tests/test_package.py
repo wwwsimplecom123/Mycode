@@ -203,3 +203,26 @@ class PackageImportTests(unittest.TestCase):
             UserConfirmationAction,
         ):
             self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_six_c_diagnostic_seams(self):
+        from shielddome_endpoint import (
+            DIAGNOSTIC_ARCHIVE_NAMES,
+            DIAGNOSTIC_LOOKBACK_DAYS,
+            DIAGNOSTIC_SCHEMA_VERSION,
+            DiagnosticExporter,
+            DiagnosticsCollector,
+            SanitizedDiagnostics,
+        )
+
+        self.assertEqual(DIAGNOSTIC_SCHEMA_VERSION, "1.0")
+        self.assertEqual(DIAGNOSTIC_LOOKBACK_DAYS, 15)
+        self.assertEqual(
+            DIAGNOSTIC_ARCHIVE_NAMES,
+            ("diagnostics.json", "compatibility.json", "manifest.json"),
+        )
+        for public_type in (
+            DiagnosticExporter,
+            DiagnosticsCollector,
+            SanitizedDiagnostics,
+        ):
+            self.assertIsNotNone(public_type)

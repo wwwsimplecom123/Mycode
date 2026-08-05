@@ -170,3 +170,49 @@ class OfflineConstraintTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, sources)
+
+    def test_phase_six_c_has_no_network_listener_upload_or_background_code(self):
+        source_root = ENDPOINT_ROOT / "src" / "shielddome_endpoint"
+        sources = "\n".join(
+            (source_root / filename).read_text(encoding="utf-8").casefold()
+            for filename in ("diagnostics.py", "diagnostic_export.py")
+        )
+
+        for forbidden in (
+            "import socket",
+            ".connect(",
+            ".bind(",
+            ".listen(",
+            "requests.",
+            "urllib.",
+            "http://",
+            "https://",
+            "upload",
+            "threading",
+            "sched",
+            "subprocess",
+            "traceback",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, sources)
+
+    def test_phase_six_c_is_not_exposed_to_native_messaging_or_extension(self):
+        sources = "\n".join(
+            path.read_text(encoding="utf-8").casefold()
+            for path in (
+                ENDPOINT_ROOT / "src" / "shielddome_endpoint" / "native_host.py",
+                ENDPOINT_ROOT / "src" / "shielddome_endpoint" / "native_payload.py",
+                ENDPOINT_ROOT / "extension" / "background.js",
+                ENDPOINT_ROOT / "extension" / "content.js",
+            )
+        )
+
+        for forbidden in (
+            "diagnosticexporter",
+            "diagnostics.json",
+            "manifest.json",
+            ".diag.zip",
+            "diagnostic_output_path",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, sources)

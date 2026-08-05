@@ -1,4 +1,5 @@
 from contextlib import closing
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 import hmac
@@ -59,6 +60,36 @@ class ExampleConfirmationStatus(StrEnum):
 
 class ExampleStoreError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class ExampleLibraryAggregate:
+    total_rows: int
+    unique_examples: int
+    benign_labels: int
+    phishing_labels: int
+    conflicts: int
+
+    def __post_init__(self) -> None:
+        values = (
+            self.total_rows,
+            self.unique_examples,
+            self.benign_labels,
+            self.phishing_labels,
+            self.conflicts,
+        )
+        if (
+            any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                for value in values
+            )
+            or self.total_rows != self.benign_labels + self.phishing_labels
+            or self.unique_examples > self.total_rows
+            or self.conflicts > self.unique_examples
+        ):
+            raise ValueError("invalid_example_library_aggregate")
 
 
 def _overwrite_and_unlink(path: Path) -> bool:
@@ -445,6 +476,50 @@ class ExampleStore:
             raise ExampleStoreError("example_read_failed") from None
         return tuple(self._decode_row(row) for row in rows)
 
+    def diagnostic_aggregate(self) -> ExampleLibraryAggregate:
+        if not self.database_path.exists():
+            return ExampleLibraryAggregate(0, 0, 0, 0, 0)
+        self._key()
+        try:
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT keyed_fingerprint, label, confirmed_at_utc,
+                           schema_version, nonce, ciphertext,
+                           authentication_tag
+                    FROM confirmed_examples
+                    ORDER BY keyed_fingerprint, label
+                    LIMIT ?
+                    """,
+                    (EXAMPLE_CALIBRATION_SCAN_MAX_ROWS + 1,),
+                ).fetchall()
+        except ExampleStoreError:
+            raise
+        except (OSError, sqlite3.Error):
+            raise ExampleStoreError("example_read_failed") from None
+        if len(rows) > EXAMPLE_CALIBRATION_SCAN_MAX_ROWS:
+            raise ExampleStoreError("example_diagnostic_limit_exceeded")
+        examples = tuple(self._decode_row(row) for row in rows)
+        labels_by_fingerprint: dict[str, set[ExampleLabel]] = {}
+        for example in examples:
+            labels_by_fingerprint.setdefault(
+                example.keyed_fingerprint,
+                set(),
+            ).add(example.label)
+        return ExampleLibraryAggregate(
+            total_rows=len(examples),
+            unique_examples=len(labels_by_fingerprint),
+            benign_labels=sum(
+                example.label is ExampleLabel.BENIGN for example in examples
+            ),
+            phishing_labels=sum(
+                example.label is ExampleLabel.PHISHING for example in examples
+            ),
+            conflicts=sum(
+                len(labels) > 1 for labels in labels_by_fingerprint.values()
+            ),
+        )
+
     def delete(self, keyed_fingerprint: str, label: ExampleLabel) -> bool:
         if (
             not isinstance(keyed_fingerprint, str)
@@ -519,6 +594,7 @@ __all__ = [
     "EXAMPLE_PAGE_MAX_ITEMS",
     "EXAMPLE_PAGE_MAX_OFFSET",
     "ExampleConfirmationStatus",
+    "ExampleLibraryAggregate",
     "ExampleStore",
     "ExampleStoreError",
 ]

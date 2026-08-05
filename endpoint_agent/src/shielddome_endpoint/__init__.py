@@ -1,3 +1,6 @@
+__version__ = "0.1.0"
+
+
 from .corpus import (
     CORPUS_MAX_CANDIDATES,
     CORPUS_SCHEMA_VERSION,
@@ -63,8 +66,30 @@ from .example_store import (
     EXAMPLE_PAGE_MAX_ITEMS,
     EXAMPLE_PAGE_MAX_OFFSET,
     ExampleConfirmationStatus,
+    ExampleLibraryAggregate,
     ExampleStore,
     ExampleStoreError,
+)
+from .diagnostics import (
+    DIAGNOSTIC_LOOKBACK_DAYS,
+    DIAGNOSTIC_MAX_ERROR_CODE_KINDS,
+    DIAGNOSTIC_MAX_EVIDENCE_RECORDS,
+    DIAGNOSTIC_MAX_SOURCE_KINDS,
+    DIAGNOSTIC_SCHEMA_VERSION,
+    DiagnosticCollectionError,
+    DiagnosticHealthStatus,
+    DiagnosticStoreHealth,
+    DiagnosticsCollector,
+    SanitizedDiagnostics,
+)
+from .diagnostic_export import (
+    DIAGNOSTIC_ARCHIVE_MAX_BYTES,
+    DIAGNOSTIC_ARCHIVE_NAMES,
+    DIAGNOSTIC_FILE_MAX_BYTES,
+    DIAGNOSTIC_MANIFEST_SCHEMA_VERSION,
+    DiagnosticExportError,
+    DiagnosticExportResult,
+    DiagnosticExporter,
 )
 from .detection_kernel import DetectionKernel
 from .evidence_crypto import (
@@ -103,8 +128,6 @@ from .native_host import NativeHostHandler, run_native_host
 from .rule_evaluator import FeatureVectorValidationError, LocalRuleEvaluator
 
 
-__version__ = "0.1.0"
-
 __all__ = [
     "__version__",
     "MAIL_OBSERVATION_SCHEMA_VERSION",
@@ -141,8 +164,26 @@ __all__ = [
     "EXAMPLE_PAGE_MAX_ITEMS",
     "EXAMPLE_PAGE_MAX_OFFSET",
     "ExampleConfirmationStatus",
+    "ExampleLibraryAggregate",
     "ExampleStore",
     "ExampleStoreError",
+    "DIAGNOSTIC_LOOKBACK_DAYS",
+    "DIAGNOSTIC_MAX_ERROR_CODE_KINDS",
+    "DIAGNOSTIC_MAX_EVIDENCE_RECORDS",
+    "DIAGNOSTIC_MAX_SOURCE_KINDS",
+    "DIAGNOSTIC_SCHEMA_VERSION",
+    "DiagnosticCollectionError",
+    "DiagnosticHealthStatus",
+    "DiagnosticStoreHealth",
+    "DiagnosticsCollector",
+    "SanitizedDiagnostics",
+    "DIAGNOSTIC_ARCHIVE_MAX_BYTES",
+    "DIAGNOSTIC_ARCHIVE_NAMES",
+    "DIAGNOSTIC_FILE_MAX_BYTES",
+    "DIAGNOSTIC_MANIFEST_SCHEMA_VERSION",
+    "DiagnosticExportError",
+    "DiagnosticExportResult",
+    "DiagnosticExporter",
     "ModelConfidenceState",
     "ModelExecutionStatus",
     "DetectionExecutionState",

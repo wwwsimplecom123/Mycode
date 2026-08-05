@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、**Phase 6A：加密证据存储、15 天留存与全部删除**，以及 **Phase 6B：Confirmed Example Library 与有限校准**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`；Phase 6 总状态为 `in_progress`，Phase 6B 为 `complete`，Phase 6C 保持 `pending`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**，以及完整的 **Phase 6：加密证据存储、Confirmed Example Library 和一次性脱敏诊断包导出**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`，Phase 7 保持 `pending`。
 
 现有生产包只包含：
 
@@ -45,11 +45,14 @@
 - 密文/标签/密钥/schema 损坏安全失败、SQLite 原文缺失、连续检测隔离，以及存储失败不阻断 Native Host 检测结果；
 - 只接受明确“确认正常/确认钓鱼”动作的严格 Confirmed Example 契约、每用户独立 DPAPI/AES-256-GCM 样本库、HMAC-SHA-256 keyed fingerprint、分页/筛选/去重/冲突/删除/清空和容量边界；
 - 一条无冲突精确样本或至少三条高相似一致标签样本的有限校准，正常/钓鱼调整分别固定为 `-8/+18`，不能降低强规则下限或单独产生 `critical`；
+- 只在调用方明确确认且选择输出路径后执行的一次性脱敏诊断导出，默认拒绝覆盖，固定只含 `diagnostics.json`、`compatibility.json` 和 `manifest.json`；
+- 最近 15 天证据、规则/模型状态、稳定错误码、Evidence Store/Confirmed Example Library 健康与样本标签/冲突的有界聚合，以及逐文件大小/SHA-256 manifest；
+- 当前用户临时目录、成功/失败清理、跨用户密钥作用域拒绝、固定归档名与大小/数量上限；诊断导出不进入 Native Messaging、插件、样本库或网络；
 - `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "3.0"`。
 
 独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
 
-现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型/样本融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束、DetectionOutcome 隐私扫描、Phase 6A 的真实当前用户 DPAPI/AES-GCM/SQLite/留存/删除，以及 Phase 6B 的显式确认、用户隔离、原文缺失、篡改、去重、冲突、容量、删除和有限校准。插件只能提供 `MailObservation` 事实，不能提供样本确认、标签、相似度、规则、分数、强证据、模型状态或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收、诊断包导出或桌面 UI；Phase 5B 的构建与注册配置不等于 `.exe` 或浏览器验收已经完成。不得把少量合成实验指标、Phase 4A/4A.1 interface、Phase 6A/6B 本地数据能力或 `README.md` 的目标能力误认为正式模型、Phase 6C 或桌面产品已经交付。
+现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型/样本融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束、DetectionOutcome 隐私扫描、Phase 6A 的真实当前用户 DPAPI/AES-GCM/SQLite/留存/删除、Phase 6B 的显式确认/用户隔离/篡改/去重/冲突/容量/删除/有限校准，以及 Phase 6C 的确认/覆盖门禁、白名单 ZIP、隐私扫描、manifest 哈希、数量/大小限制、临时清理、无网络和失败隔离。插件只能提供 `MailObservation` 事实，不能提供样本确认、标签、相似度、规则、分数、强证据、模型状态、诊断包内容/路径或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收或桌面 UI；Phase 5B 的构建与注册配置不等于 `.exe` 或浏览器验收已经完成。不得把少量合成实验指标、Phase 4A/4A.1 interface、Phase 6 本地数据能力或 `README.md` 的目标能力误认为正式模型或 Phase 7 桌面产品已经交付。
 
 ## 3. 目录边界
 

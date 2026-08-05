@@ -50,6 +50,8 @@ class WheelBuildTests(unittest.TestCase):
                     "shielddome_endpoint/domain.py",
                     "shielddome_endpoint/confirmed_examples.py",
                     "shielddome_endpoint/detection_kernel.py",
+                    "shielddome_endpoint/diagnostic_export.py",
+                    "shielddome_endpoint/diagnostics.py",
                     "shielddome_endpoint/example_calibration.py",
                     "shielddome_endpoint/example_store.py",
                     "shielddome_endpoint/evidence_crypto.py",

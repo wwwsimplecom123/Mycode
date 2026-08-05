@@ -314,6 +314,8 @@ class EvidenceStore:
             or not 1 <= limit <= EVIDENCE_PAGE_MAX_ITEMS
         ):
             raise EvidenceStoreError("invalid_store_request")
+        if not self.database_path.exists():
+            return ()
         self._cipher()
         try:
             with closing(self._connect()) as connection:

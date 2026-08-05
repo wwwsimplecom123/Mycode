@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**，以及完整的 **Phase 6：加密证据存储、Confirmed Example Library 与一次性脱敏诊断包导出**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`；Phase 7 为下一实施阶段且保持 `pending`。当前提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6：加密证据存储、Confirmed Example Library 与一次性脱敏诊断包导出**，以及服务层 **Phase 7A：个人控制台应用服务与数据 ViewModel**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`；Phase 7 总状态为 `in_progress`，Phase 7A 为 `complete`，Phase 7B 与 Phase 7C 保持 `pending`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -41,8 +41,11 @@
 - 必须由调用方选择输出路径并传入 `confirmed=True` 的一次性脱敏诊断包；默认拒绝覆盖，覆盖要求额外 `overwrite=True`；
 - 固定三文件 ZIP 白名单、15 天有界聚合、Evidence Store/Confirmed Example Library 受控健康状态、粗化系统兼容信息和逐 payload SHA-256 manifest；
 - 诊断临时目录成功/失败清理、跨用户作用域拒绝、内容隐私扫描、数量/大小上限、无网络和检测失败隔离。
+- 不依赖 GUI 框架的 `PersonalConsoleService` 和不可变、版本化的控制台 ViewModel；
+- 当前用户本地时区今日统计、15 天补零趋势、风险/来源/模型拒判/故障/纯规则降级统计，以及有界事件和样本查询；
+- 只经服务执行的明确样本确认、样本删除/清空、用户选路诊断导出和协调全部本地数据删除命令。
 
-生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam，以及 Phase 6 的加密证据、明确确认样本库/有限校准和一次性脱敏诊断导出。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型或提供桌面 UI；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实，不能触发诊断导出或获得包内容/路径。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam、Phase 6 的加密证据/明确确认样本库/有限校准/一次性脱敏诊断导出，以及 Phase 7A 的个人控制台服务边界。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型或提供桌面 UI/托盘/图表；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实，不能触发诊断导出或获得包内容/路径。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
 
 ## 2. 环境要求
 
@@ -423,6 +426,30 @@ manifest.json
 
 诊断包不会自动生成、定时生成、上传、发送、进入训练或进入 Confirmed Example Library。Native Messaging 和浏览器插件没有诊断命令，不能获得诊断内容或输出路径；该功能不添加 HTTP、WebSocket、TCP/UDP 连接或监听端口。
 
+### 7.3 Personal Console Service
+
+Phase 7A 提供 GUI 无关的 `PersonalConsoleService`。Phase 7B 的桌面界面只能通过此服务读取或执行操作，不能直接访问 SQLite、DPAPI、AES-GCM、密钥或密文：
+
+```python
+from shielddome_endpoint import PersonalConsoleService
+
+
+console = PersonalConsoleService()
+dashboard_result = console.get_dashboard()
+events_result = console.list_recent_events(offset=0, limit=50)
+examples_result = console.list_confirmed_examples(offset=0, limit=50)
+```
+
+Dashboard 使用注入的时钟和本地时区：存储时间保持 UTC，“今日”按当前 Windows 用户本地日历边界计算；趋势固定返回最近 15 个本地日期并对缺失日期补零。统计包含总检测量、风险等级、检测来源、模型拒判、模型故障和纯规则降级数量，以及受控 Evidence Store/Confirmed Example Library 健康状态。默认最多扫描 4,096 条证据；事件页最多 50 条。样本查询最多扫描 512 行、页大小最多 50、offset 最多 256。
+
+事件列表只返回本地事件 ID、UTC 检测时间、风险等级、检测状态、通用动作、来源类型、模型拒判/执行状态、降级状态和稳定错误码；详情只额外返回规则代码。样本页只返回临时不透明命令 ID、人工标签、固定来源、确认 UTC 时间、Feature/Example schema 版本和冲突标志。所有 ViewModel 都不包含主题、正文、地址、URL、附件名、FeatureVector、样本 fingerprint、数据库/sidecar、密钥、nonce、认证标签、密文、路径、异常文本或堆栈。
+
+写操作必须显式调用服务命令。确认样本只有在 `confirmed is True` 时才写入；检测和查询永不自动确认。样本删除使用当前服务实例最近分页产生的不透明 ID，不能从该 ID 推导 fingerprint。清空样本、诊断导出和全部删除同样要求精确布尔确认；诊断导出还要求用户选择输出路径，服务结果不会回显该路径或归档哈希。
+
+全部删除会分别尝试删除 Evidence Store、Confirmed Example Library、各自当前用户密钥、SQLite WAL/SHM/journal/temp sidecar，以及当前用户 Agent 根目录内的 `diagnostic-temp`。任一层失败后仍继续尝试其余层，并返回稳定 `local_data_delete_partial_failure`，不泄露失败路径或异常文本。空存储查询先检查文件存在性，不会创建数据库或密钥；跨 Windows 用户作用域、损坏密文或数据库均返回受控不可用健康状态和零数据，不返回部分结果。
+
+Phase 7A 没有 HTTP、WebSocket、RPC、网络客户端、监听端口、浏览器控制台、PySide6、托盘、图表、线程调度、`.eml` 解析、自动上传或中心后台能力。桌面 UI 属于 Phase 7B，安全 `.eml` 拖入属于 Phase 7C，两者保持 `pending`。
+
 ## 8. Corpus Governance
 
 稳定入口：
@@ -692,9 +719,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- 托盘、控制台、`.eml` 或邮件客户端 adapter。
+- Phase 7B 的托盘、桌面控制台 UI 和图表；
+- Phase 7C 的安全 `.eml` 拖入检测或其他邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A、Phase 6B、Phase 6C 与 Phase 6 均已完成。下一实施阶段为 Phase 7，但托盘、个人控制台、数据看板和 `.eml` 接入仍保持 `pending`，本次没有提前实现。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A、Phase 6B、Phase 6C 与 Phase 6 均已完成。Phase 7A 已完成，Phase 7 总状态保持 `in_progress`；Phase 7B 托盘/桌面 UI 与 Phase 7C `.eml` 接入仍为 `pending`，本次没有提前实现。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 14. 修改后的最低验证
 

@@ -226,3 +226,27 @@ class PackageImportTests(unittest.TestCase):
             SanitizedDiagnostics,
         ):
             self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_seven_a_console_service_seams(self):
+        from shielddome_endpoint import (
+            CONSOLE_EVIDENCE_SCAN_MAX_RECORDS,
+            CONSOLE_EVENT_PAGE_MAX_ITEMS,
+            CONSOLE_EXAMPLE_PAGE_MAX_ITEMS,
+            CONSOLE_VIEW_MODEL_SCHEMA_VERSION,
+            ConsoleOperationResult,
+            ConsoleStatusCode,
+            DashboardViewModel,
+            PersonalConsoleService,
+        )
+
+        self.assertEqual(CONSOLE_VIEW_MODEL_SCHEMA_VERSION, "1.0")
+        self.assertEqual(CONSOLE_EVIDENCE_SCAN_MAX_RECORDS, 4096)
+        self.assertEqual(CONSOLE_EVENT_PAGE_MAX_ITEMS, 50)
+        self.assertEqual(CONSOLE_EXAMPLE_PAGE_MAX_ITEMS, 50)
+        for public_type in (
+            ConsoleOperationResult,
+            ConsoleStatusCode,
+            DashboardViewModel,
+            PersonalConsoleService,
+        ):
+            self.assertIsNotNone(public_type)

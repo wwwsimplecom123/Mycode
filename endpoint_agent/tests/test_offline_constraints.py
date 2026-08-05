@@ -216,3 +216,38 @@ class OfflineConstraintTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, sources)
+
+    def test_phase_seven_a_has_no_ui_network_listener_or_eml_capability(self):
+        source_root = ENDPOINT_ROOT / "src" / "shielddome_endpoint"
+        sources = "\n".join(
+            (source_root / filename).read_text(encoding="utf-8").casefold()
+            for filename in (
+                "console_models.py",
+                "console_service.py",
+                "local_data_commands.py",
+            )
+        )
+
+        for forbidden in (
+            "import socket",
+            ".connect(",
+            ".bind(",
+            ".listen(",
+            "requests.",
+            "urllib.",
+            "http://",
+            "https://",
+            "fastapi",
+            "flask",
+            "uvicorn",
+            "websocket",
+            "pyside6",
+            "import email",
+            "mailparser",
+            "threading",
+            "subprocess",
+            "telemetry",
+            "upload",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, sources)

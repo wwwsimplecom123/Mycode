@@ -51,6 +51,10 @@ class WheelBuildTests(unittest.TestCase):
                     "shielddome_endpoint/confirmed_examples.py",
                     "shielddome_endpoint/console_models.py",
                     "shielddome_endpoint/console_service.py",
+                    "shielddome_endpoint/desktop_app.py",
+                    "shielddome_endpoint/desktop_lifecycle.py",
+                    "shielddome_endpoint/desktop_presenter.py",
+                    "shielddome_endpoint/desktop_qt.py",
                     "shielddome_endpoint/detection_kernel.py",
                     "shielddome_endpoint/diagnostic_export.py",
                     "shielddome_endpoint/diagnostics.py",
@@ -91,4 +95,6 @@ class WheelBuildTests(unittest.TestCase):
             self.assertIn("Version: 0.1.0", metadata)
             self.assertIn("Requires-Python: >=3.12", metadata)
             self.assertIn("Requires-Dist: cryptography==49.0.0", metadata)
+            self.assertIn("Requires-Dist: PySide6-Essentials==6.8.3", metadata)
+            self.assertIn("Requires-Dist: tzdata==2026.3", metadata)
             self.assertNotIn("PyInstaller", metadata)

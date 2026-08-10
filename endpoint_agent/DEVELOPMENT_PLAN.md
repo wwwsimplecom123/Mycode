@@ -528,7 +528,7 @@ Status: complete
 - 已实现 SQLite `secure_delete`、WAL checkpoint/truncate、VACUUM、已知 WAL/SHM/journal/temp 文件覆写删除，以及删除 DPAPI 保护密钥的密码学销毁；全部删除幂等。
 - Native Host 在检测完成后尽力保存证据；存储初始化、清理、投影或写入失败都不改变四字段检测结果，也不向协议 stdout 输出异常文本或存储材料。
 - Windows 当前用户真实 DPAPI、用户作用域、AES-GCM 随机化/篡改、数据库原文搜索、15 天边界、全部删除、连续事件隔离、离线约束和完整 Endpoint Agent 回归均已有自动化测试。
-- 生产运行依赖固定为 `cryptography==49.0.0`；构建与部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖，Agent 运行时不下载依赖。
+- 生产运行依赖固定为 `cryptography==49.0.0`；构建与部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖，Agent 运行时不下载依赖。Phase 7B.1 另固定 `PySide6-Essentials==6.8.3` 与 `tzdata==2026.3`，后者为 Windows 的真实命名时区和本地日历边界提供 IANA 数据库。
 
 #### Phase 6B：Confirmed Example Library 与有限校准
 
@@ -576,11 +576,26 @@ Status: complete
 
 #### Phase 7B：Windows 托盘和桌面控制台 UI
 
+Status: in_progress
+
+##### Phase 7B.1：Windows 托盘与只读个人安全控制台
+
+Status: complete
+
+- 已使用固定 `PySide6-Essentials==6.8.3` 与 `tzdata==2026.3` 建立独立桌面入口、主窗口、页面导航、系统托盘、Presenter/UI adapter、稳定错误边界、真实命名时区支持和可测试生命周期；核心包在没有 PySide6 时仍可导入。
+- UI 只调用 Phase 7A `PersonalConsoleService`，不直接导入 SQLite、EvidenceStore、ExampleStore、DPAPI、AES-GCM、密钥、密文或任何写命令。
+- 已实现今日检测、15 天补零趋势、风险/来源分布、模型拒判/故障/纯规则降级计数、最近事件分页和脱敏详情；空库、损坏存储和降级状态使用固定安全文案。
+- 已实现托盘本地状态、打开、隐藏和显式退出；普通窗口关闭只隐藏到托盘。
+- 已使用 Qt Widgets 与 `QPainter` 自绘轻量图表，不引入 Qt Charts、浏览器页面、Electron、本地 HTTP、网络客户端或监听端口。
+- 已在真实 PySide6 Windows 环境启动并检查 1366x768 与最低 1024x720 截图；表格、图表、按钮和状态区域尺寸稳定，无重叠或截断。
+
+##### Phase 7B.2：启动集成与个人数据写交互
+
 Status: pending
 
-- 托盘状态、开机启动和调用 Phase 7A 服务的桌面个人控制台。
-- 今日/趋势/分布图表、记录详情和样本/诊断/删除交互。
-- 最低分辨率、低配置流畅度和真实桌面交互验收。
+- 当前用户登录启动与安装/卸载生命周期集成。
+- Confirmed Example Library、误报/漏报、诊断导出和本地数据删除的桌面交互。
+- 本子阶段不得被 Phase 7B.1 的只读界面替代或提前标记完成。
 
 #### Phase 7C：安全 `.eml` 拖入检测
 
@@ -589,7 +604,7 @@ Status: pending
 - 只在独立安全设计、资源边界和隐私测试完成后实现 `.eml` 拖入检测。
 - 不复用浏览器作为控制台，不扩展为跨用户、管理员或中心后台功能。
 
-Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A 完成后 Phase 7 总状态保持 `in_progress`。
+Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A 与 Phase 7B.1 已完成，Phase 7B.2 与 Phase 7C 仍为 `pending`，因此 Phase 7 总状态保持 `in_progress`。
 
 ### Phase 8：Endpoint Release
 
@@ -671,4 +686,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已完成：Phase 6A 提供当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6B 提供显式确认样本库与有限校准；Phase 6C 提供显式确认、用户选路、默认不覆盖的一次性脱敏诊断包。下一实施阶段更新为 Phase 7，但 Phase 7 仍为 `pending`，本次没有实现托盘、控制台、数据看板或 `.eml` 接入。
+Phase 6 已完成：Phase 6A 提供当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6B 提供显式确认样本库与有限校准；Phase 6C 提供显式确认、用户选路、默认不覆盖的一次性脱敏诊断包。Phase 7 保持 `in_progress`：Phase 7A 服务层与 Phase 7B.1 Windows 托盘/只读个人安全控制台已经完成；Phase 7B.2 启动集成和个人数据写交互、Phase 7C 安全 `.eml` 接入仍为 `pending`，不得提前实施。

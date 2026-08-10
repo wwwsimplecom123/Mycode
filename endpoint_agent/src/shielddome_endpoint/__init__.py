@@ -78,6 +78,17 @@ from .console_service import (
     CONSOLE_LOOKBACK_DAYS,
     PersonalConsoleService,
 )
+from .desktop_presenter import (
+    DESKTOP_EVENT_PAGE_SIZE,
+    AgentStatusDisplay,
+    ChartValue,
+    DesktopConsoleState,
+    DesktopLoadState,
+    EventDetailDisplay,
+    EventPageDisplay,
+    EventRowDisplay,
+    PersonalConsolePresenter,
+)
 from .example_calibration import (
     EXAMPLE_APPROXIMATE_MIN_MATCHES,
     EXAMPLE_APPROXIMATE_SIMILARITY_THRESHOLD,
@@ -198,6 +209,15 @@ __all__ = [
     "ModelRuntimeStatus",
     "StoreHealthViewModel",
     "PersonalConsoleService",
+    "DESKTOP_EVENT_PAGE_SIZE",
+    "AgentStatusDisplay",
+    "ChartValue",
+    "DesktopConsoleState",
+    "DesktopLoadState",
+    "EventDetailDisplay",
+    "EventPageDisplay",
+    "EventRowDisplay",
+    "PersonalConsolePresenter",
     "ExampleLabel",
     "ExampleSource",
     "UserConfirmationAction",

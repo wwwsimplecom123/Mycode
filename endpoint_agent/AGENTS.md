@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6：加密证据存储、Confirmed Example Library 和一次性脱敏诊断包导出**，以及 **Phase 7A：个人控制台应用服务与数据 ViewModel**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`；Phase 7 总状态为 `in_progress`，Phase 7A 为 `complete`，Phase 7B 与 Phase 7C 保持 `pending`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6：加密证据存储、Confirmed Example Library 和一次性脱敏诊断包导出**、**Phase 7A：个人控制台应用服务与数据 ViewModel**，以及 **Phase 7B.1：Windows 托盘与只读个人安全控制台**。Phase 3 因没有 Approved Training Corpus 而被有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`，Phase 4B 保持 `pending`；Phase 5 总状态为 `in_progress`，Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`；Phase 7 总状态为 `in_progress`，Phase 7A 与 Phase 7B.1 为 `complete`，Phase 7B 为 `in_progress`，Phase 7B.2 与 Phase 7C 保持 `pending`。
 
 现有生产包只包含：
 
@@ -51,11 +51,14 @@
 - 不依赖 GUI 框架的 `PersonalConsoleService`，以及不可变、版本化的 Dashboard、事件、样本分页和稳定操作结果 ViewModel；
 - 当前用户本地加密记录上的今日/15 天趋势/风险/来源/模型拒判/模型故障/纯规则降级统计，最近事件脱敏分页/详情和样本库筛选分页；
 - 只经服务执行的显式样本确认、样本删除/清空、用户选路诊断导出和协调证据库/样本库/密钥/sidecar/临时文件的全部删除命令；
+- GUI 无关的 `PersonalConsolePresenter`、可测试 `DesktopLifecycle`，以及只调用 `PersonalConsoleService` 的 PySide6 Widgets 主窗口和 UI adapter；
+- 今日/15 天趋势/风险与来源分布/模型状态计数、最近事件分页和脱敏详情的只读桌面呈现，以及托盘打开/隐藏/显式退出和关闭窗口隐藏行为；
+- 使用 `QPainter` 的轻量图表、1024x720 最低布局、1366x768 默认验证，以及空库/损坏/降级固定状态边界；
 - `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "3.0"`。
 
 独立训练侧 `training/shielddome_training/` 提供固定 140 维 Feature Assembler、合成数据 Logistic Regression、validation-only sigmoid 候选与 Brier 质量门禁、validation-only 拒判阈值、test-only 拒判感知分组评估、JSON/Markdown 报告和 identity/sigmoid 两条 ONNX Runtime CPU 一致性验证。训练依赖只存在于被忽略的 `.venv-training/`，训练代码和依赖均不得进入生产 Wheel。
 
-现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型/样本融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束、DetectionOutcome 隐私扫描、Phase 6A 的真实当前用户 DPAPI/AES-GCM/SQLite/留存/删除、Phase 6B 的显式确认/用户隔离/篡改/去重/冲突/容量/删除/有限校准、Phase 6C 的确认/覆盖门禁、白名单 ZIP、隐私扫描、manifest 哈希、数量/大小限制、临时清理、无网络和失败隔离，以及 Phase 7A 的本地时区统计、补零趋势、分页上限、脱敏 ViewModel、空库只读、跨用户隔离、损坏存储健康、显式命令和删除协调。插件只能提供 `MailObservation` 事实，不能提供样本确认、标签、相似度、规则、分数、强证据、模型状态、诊断包内容/路径或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收、桌面 UI、托盘、图表或 `.eml` 接入；Phase 5B 的构建与注册配置不等于 `.exe` 或浏览器验收已经完成，Phase 7A 应用服务也不等于 Phase 7 桌面产品已经交付。不得把少量合成实验指标、Phase 4A/4A.1 interface、Phase 6 本地数据能力或 `README.md` 的目标能力误认为正式模型或 Phase 7 桌面产品已经交付。
+现有测试还覆盖 FeatureVector 边界拒绝、本地规则稳定性/强度/资源上限、Local Detection Service 信任边界、Local Inference unavailable、Model Assessment 非法输出、规则/模型/样本融合、Kernel 降级、Native Messaging 异常载荷/origin/数据隔离、插件静态离线约束、DetectionOutcome 隐私扫描、Phase 6A 的真实当前用户 DPAPI/AES-GCM/SQLite/留存/删除、Phase 6B 的显式确认/用户隔离/篡改/去重/冲突/容量/删除/有限校准、Phase 6C 的确认/覆盖门禁、白名单 ZIP、隐私扫描、manifest 哈希、数量/大小限制、临时清理、无网络和失败隔离、Phase 7A 的本地时区统计/补零趋势/分页/脱敏/损坏存储，以及 Phase 7B.1 的 Presenter 映射、生命周期、真实 Qt offscreen/Windows 渲染、托盘动作、无 PySide 导入和零网络约束。插件只能提供 `MailObservation` 事实，不能提供样本确认、标签、相似度、规则、分数、强证据、模型状态、诊断包内容/路径或最终结果。当前环境仍没有 Approved Training Corpus、正式训练数据、可发布 Unified Model Release、生产 ONNX Runtime adapter、实际 Host 可执行文件/默认浏览器注册/真实浏览器验收、开机启动、桌面写交互或 `.eml` 接入。不得把少量合成实验指标、Phase 4A/4A.1 interface、Phase 6 本地数据能力、Phase 7A 服务或 Phase 7B.1 只读界面误认为正式模型或完整 Phase 7 桌面产品已经交付。
 
 ## 3. 目录边界
 
@@ -93,7 +96,7 @@
 - 生产代码放在 `endpoint_agent/src/shielddome_endpoint/`。
 - 测试放在 `endpoint_agent/tests/`。
 - wheel 构建使用项目内置的零外部依赖 PEP 517 后端；没有明确授权和离线复现证据时，不得重新引入第三方 build backend requirement。
-- Phase 6A 唯一新增生产运行依赖为固定 `cryptography==49.0.0`；它不是 build backend requirement，必须由批准的离线缓存随 Endpoint Release 构建环境提供，禁止在 Agent 运行时下载。
+- 生产运行依赖固定为 `cryptography==49.0.0`、`PySide6-Essentials==6.8.3` 与 `tzdata==2026.3`；它们不是 build backend requirement，必须由批准的离线缓存随 Endpoint Release 构建环境提供，禁止在 Agent 运行时下载。`tzdata` 为 Windows 提供真实命名时区和本地日历边界所需的 IANA 数据库。桌面实现不得引入 Qt Addons、Qt Charts、QML、WebEngine 或 QtNetwork。
 - 领域数据优先使用明确类型和不可变结构，不用松散字典替代稳定公共契约。
 - 每个文件保持单一职责；业务逻辑不要堆积在包入口或未来 UI 中。
 - 不为了未来阶段创建空 service、adapter、database、model 或 UI 占位实现。

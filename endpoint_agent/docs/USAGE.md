@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6：加密证据存储、Confirmed Example Library 与一次性脱敏诊断包导出**，以及服务层 **Phase 7A：个人控制台应用服务与数据 ViewModel**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`；Phase 7 总状态为 `in_progress`，Phase 7A 为 `complete`，Phase 7B 与 Phase 7C 保持 `pending`。当前提供：
+当前仓库已完成开发期 **Phase 2：基线模型与评估**、模型无关的 **Phase 4A：Detection Kernel**、**Phase 4A.1：本地规则评估与端到端 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6：加密证据存储、Confirmed Example Library 与一次性脱敏诊断包导出**、服务层 **Phase 7A：个人控制台应用服务与数据 ViewModel**，以及 **Phase 7B.1：Windows 托盘与只读个人安全控制台**。Phase 3 因缺少 Approved Training Corpus 而有意暂缓并保持 `pending`；Phase 4 总状态为 `in_progress`、Phase 4B 为 `pending`；Phase 5 总状态为 `in_progress`、Phase 5B 已进入 `in_progress`；Phase 6A、Phase 6B、Phase 6C 与 Phase 6 总状态均为 `complete`；Phase 7 总状态为 `in_progress`，Phase 7A 与 Phase 7B.1 为 `complete`，Phase 7B 为 `in_progress`，Phase 7B.2 与 Phase 7C 保持 `pending`。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -54,7 +54,7 @@
 - Git，可执行 `git check-ignore`；
 - 在仓库根目录 `C:\Users\huohuo\Desktop\project1\ShieldDome` 执行命令。
 
-生产 Wheel 的唯一第三方运行时依赖是固定 `cryptography==49.0.0`，用于 Phase 6A/6B AES-256-GCM。构建和部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖；`pip wheel --no-index --no-deps` 只构建 ShieldDome Wheel，不会下载或封装该依赖。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
+生产 Wheel 的固定第三方运行时依赖是 `cryptography==49.0.0`、`PySide6-Essentials==6.8.3` 与 `tzdata==2026.3`。`cryptography` 用于 Phase 6A/6B AES-256-GCM，PySide6 Essentials 用于 Phase 7B.1 桌面界面，`tzdata` 在 Windows 上提供 `ZoneInfo` 验证真实命名时区和本地日历边界所需的 IANA 数据库。构建和部署必须从批准的离线缓存提供匹配的 Windows wheel 及其传递依赖；`pip wheel --no-index --no-deps` 只构建 ShieldDome Wheel，不会下载或封装这些依赖，Agent 运行时也不得下载。Phase 2 训练环境使用 `requirements-training.txt` 的固定依赖，并且只能安装到被忽略的 `.venv-training/`；详见 `docs/TRAINING.md`。Host `.exe` 构建另使用 `requirements-packaging.txt` 中固定的 PyInstaller 开发依赖，必须从批准的离线缓存提供，且不得写入 `pyproject.toml`。Phase 4A 不下载模型、数据集或 NLTK 资源，也不引入 ONNX Runtime 生产依赖。
 
 ## 3. 目录概览
 
@@ -448,7 +448,44 @@ Dashboard 使用注入的时钟和本地时区：存储时间保持 UTC，“今
 
 全部删除会分别尝试删除 Evidence Store、Confirmed Example Library、各自当前用户密钥、SQLite WAL/SHM/journal/temp sidecar，以及当前用户 Agent 根目录内的 `diagnostic-temp`。任一层失败后仍继续尝试其余层，并返回稳定 `local_data_delete_partial_failure`，不泄露失败路径或异常文本。空存储查询先检查文件存在性，不会创建数据库或密钥；跨 Windows 用户作用域、损坏密文或数据库均返回受控不可用健康状态和零数据，不返回部分结果。
 
-Phase 7A 没有 HTTP、WebSocket、RPC、网络客户端、监听端口、浏览器控制台、PySide6、托盘、图表、线程调度、`.eml` 解析、自动上传或中心后台能力。桌面 UI 属于 Phase 7B，安全 `.eml` 拖入属于 Phase 7C，两者保持 `pending`。
+Phase 7A 服务本身没有 HTTP、WebSocket、RPC、网络客户端、监听端口、浏览器控制台、PySide6、托盘、图表、线程调度、`.eml` 解析、自动上传或中心后台能力。Phase 7B.1 的桌面 UI 只在该服务边界之外读取这些 ViewModel。
+
+### 7.4 Windows 托盘与只读个人安全控制台
+
+Phase 7B.1 使用 `PySide6-Essentials==6.8.3` 与 `tzdata==2026.3`。该固定 PySide6 版本支持 Python 3.12，提供 Qt Core/Gui/Widgets 与系统托盘所需模块；图表由 `QPainter` 自绘，因此不引入 PySide6 Addons 或 Qt Charts。Qt for Python 上游提供 LGPLv3、GPLv3 和商业许可选项。PyPI `tzdata` 包采用 PSF-2.0 许可，包含 IANA 时区数据库；发布方仍须对所选依赖许可完成自身合规复核和材料随附，本文不替代法律意见。
+
+UI 开发环境固定在已忽略的 `endpoint_agent/.venv-ui/`：
+
+```powershell
+python -m venv endpoint_agent/.venv-ui
+.\endpoint_agent\.venv-ui\Scripts\python.exe -m pip install -r endpoint_agent\requirements-ui.txt
+```
+
+上面的联网安装只用于受控开发机准备。生产构建和安装必须从批准的离线 wheel 缓存提供依赖；运行中的 Agent 不调用 pip，也不下载依赖：
+
+```powershell
+.\endpoint_agent\.venv-ui\Scripts\python.exe -m pip install `
+  --no-index --find-links C:\approved-wheel-cache `
+  -r endpoint_agent\requirements-ui.txt
+```
+
+源码开发运行：
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path endpoint_agent\src)
+.\endpoint_agent\.venv-ui\Scripts\python.exe -m shielddome_endpoint.desktop_app
+```
+
+主窗口只显示 Phase 7A 真实 ViewModel：今日检测数量、15 天补零趋势、风险/来源分布、模型拒判/故障/纯规则降级数量、最近事件分页和脱敏详情。托盘显示本地 Agent 状态并提供打开、隐藏、退出；普通关闭窗口只隐藏到托盘。空库、损坏存储和降级均显示固定安全状态，不呈现异常文本。
+
+UI/Presenter 不直接导入 SQLite、EvidenceStore、ExampleStore、DPAPI、AES-GCM、密钥或密文，不提供样本确认、删除、清空、诊断导出、开机启动或 `.eml` 入口，也不创建网络连接或监听端口。核心包没有 PySide6 时仍可导入；只有桌面入口返回固定依赖错误。
+
+真实 Windows Qt 截图保存在被忽略的验证目录：
+
+```text
+endpoint_agent/dist/phase7b1/screenshots/1366x768.png
+endpoint_agent/dist/phase7b1/screenshots/1024x720.png
+```
 
 ## 8. Corpus Governance
 
@@ -654,7 +691,7 @@ python -c "import shielddome_endpoint as s; print(s.__version__, s.FEATURE_SCHEM
 python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist
 ```
 
-构建由 `endpoint_agent/_build_backend.py` 完成，不要求 setuptools、wheel、Flit 或 Hatchling。`--no-index` 阻止访问包索引；Wheel metadata 会声明 `Requires-Dist: cryptography==49.0.0`，但 `--no-deps` 不会下载或打包该依赖。批准的离线 Host/Endpoint Release 构建环境必须另行提供匹配 wheel。
+构建由 `endpoint_agent/_build_backend.py` 完成，不要求 setuptools、wheel、Flit 或 Hatchling。`--no-index` 阻止访问包索引；Wheel metadata 会声明 `Requires-Dist: cryptography==49.0.0`、`Requires-Dist: PySide6-Essentials==6.8.3` 与 `Requires-Dist: tzdata==2026.3`，但 `--no-deps` 不会下载或打包这些依赖。批准的离线 Host/Endpoint Release 构建环境必须另行提供匹配 wheel。
 
 成功时生成：
 
@@ -719,15 +756,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- Phase 7B 的托盘、桌面控制台 UI 和图表；
+- Phase 7B.2 的开机启动、样本确认/删除/清空、诊断导出和全部数据删除桌面交互；
 - Phase 7C 的安全 `.eml` 拖入检测或其他邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A、Phase 6B、Phase 6C 与 Phase 6 均已完成。Phase 7A 已完成，Phase 7 总状态保持 `in_progress`；Phase 7B 托盘/桌面 UI 与 Phase 7C `.eml` 接入仍为 `pending`，本次没有提前实现。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A、Phase 6B、Phase 6C 与 Phase 6 均已完成。Phase 7A 与 Phase 7B.1 已完成，Phase 7B 为 `in_progress`，Phase 7B.2 与 Phase 7C 保持 `pending`，Phase 7 总状态保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 14. 修改后的最低验证
 
 ```powershell
 python -m unittest discover -s endpoint_agent/tests -v
+python -m unittest discover -s endpoint_agent/tests -p "test_desktop_*.py" -v
+$env:QT_QPA_PLATFORM='offscreen'; .\endpoint_agent\.venv-ui\Scripts\python.exe -m unittest discover -s endpoint_agent/tests -p "test_desktop_qt.py" -v
+.\endpoint_agent\.venv-ui\Scripts\python.exe -c "import PySide6, tzdata; print(PySide6.__version__); print(tzdata.__version__)"
 python -m unittest discover -s endpoint_agent/tests -p "test_key_protection.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_evidence_crypto.py" -v
 python -m unittest discover -s endpoint_agent/tests -p "test_evidence_store.py" -v
@@ -744,7 +784,7 @@ python -m unittest discover -s endpoint_agent/tests -p "test_native_packaging.py
 node --check endpoint_agent/extension/background.js
 node --check endpoint_agent/extension/content.js
 node --check endpoint_agent/extension/adapters/chinaccs.js
-python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase6c
+python -m pip wheel --no-index --no-deps .\endpoint_agent --wheel-dir .\endpoint_agent\dist\phase7b1
 git status --short
 git diff --stat
 git diff -- endpoint_agent

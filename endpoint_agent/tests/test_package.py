@@ -1,5 +1,8 @@
 from pathlib import Path
+import os
+import subprocess
 import sys
+import tomllib
 import unittest
 
 
@@ -7,11 +10,60 @@ ENDPOINT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ENDPOINT_ROOT / "src"))
 
 
+def run_clean_python(code: str) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(ENDPOINT_ROOT / "src")
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ENDPOINT_ROOT.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
 class PackageImportTests(unittest.TestCase):
     def test_package_exposes_version(self):
         import shielddome_endpoint
 
         self.assertEqual(shielddome_endpoint.__version__, "0.1.0")
+
+    def test_phase_seven_b_one_ui_dependency_is_exact_and_core_import_is_optional(self):
+        requirements = (ENDPOINT_ROOT / "requirements-ui.txt").read_text(
+            encoding="utf-8"
+        )
+        configuration = tomllib.loads(
+            (ENDPOINT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            requirements,
+            "cryptography==49.0.0\n"
+            "PySide6-Essentials==6.8.3\n"
+            "tzdata==2026.3\n",
+        )
+        self.assertIn(
+            "PySide6-Essentials==6.8.3",
+            configuration["project"]["dependencies"],
+        )
+        self.assertIn(
+            "tzdata==2026.3",
+            configuration["project"]["dependencies"],
+        )
+        result = run_clean_python(
+            "import sys\n"
+            "import shielddome_endpoint\n"
+            "print(shielddome_endpoint.__version__)\n"
+            "print('PySide6' in sys.modules)\n"
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertEqual(result.stdout, "0.1.0\nFalse\n")
 
     def test_package_reexports_public_domain_contracts(self):
         from shielddome_endpoint import (
@@ -249,4 +301,26 @@ class PackageImportTests(unittest.TestCase):
             DashboardViewModel,
             PersonalConsoleService,
         ):
-            self.assertIsNotNone(public_type)
+                self.assertIsNotNone(public_type)
+
+    def test_package_reexports_phase_seven_b_one_presenter_without_qt(self):
+        result = run_clean_python(
+            "import sys\n"
+            "from shielddome_endpoint import (\n"
+            "    DESKTOP_EVENT_PAGE_SIZE,\n"
+            "    DesktopConsoleState,\n"
+            "    DesktopLoadState,\n"
+            "    PersonalConsolePresenter,\n"
+            ")\n"
+            "assert DESKTOP_EVENT_PAGE_SIZE == 10\n"
+            "assert DesktopConsoleState is not None\n"
+            "assert DesktopLoadState is not None\n"
+            "assert PersonalConsolePresenter is not None\n"
+            "print('PySide6' in sys.modules)\n"
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertEqual(result.stdout, "False\n")

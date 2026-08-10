@@ -4,9 +4,9 @@ This directory contains the design and, later, the implementation of the standal
 
 ## Current Implementation Status
 
-Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 is `complete`: Phase 6A encrypted evidence storage, Phase 6B Confirmed Example Library/bounded calibration, and Phase 6C explicit one-time sanitized diagnostics export are complete. Phase 7 is `in_progress`: service-only Phase 7A is complete, while Phase 7B desktop UI and Phase 7C safe `.eml` intake remain pending.
+Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 is `complete`: Phase 6A encrypted evidence storage, Phase 6B Confirmed Example Library/bounded calibration, and Phase 6C explicit one-time sanitized diagnostics export are complete. Phase 7 is `in_progress`: service-only Phase 7A and read-only desktop-shell Phase 7B.1 are complete; Phase 7B is `in_progress`, while Phase 7B.2 startup/write interactions and Phase 7C safe `.eml` intake remain pending.
 
-The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. Phase 6A adds a strict Endpoint Evidence Record, current-user `%LOCALAPPDATA%` storage, a random DPAPI-protected data key, per-record AES-256-GCM, minimal SQLite indexes, fifteen-day cleanup, and explicit all-data deletion. Phase 6B adds an explicit-confirmation-only per-user example library, a separate DPAPI-protected random key, AES-256-GCM records, per-user HMAC fingerprints, conflict-aware bounded queries, and conservative exact/approximate calibration that cannot cancel strong rules or create critical risk alone. Phase 6C adds caller-confirmed, caller-path-selected diagnostics export with aggregate-only store queries, fixed safe ZIP entries, bounded sanitized statistics, coarse compatibility data, SHA-256 payload manifests, current-user temporary cleanup, and default no-overwrite behavior. Phase 7A adds the versioned immutable console ViewModels and the deep `PersonalConsoleService` boundary for local dashboards, bounded recent-event/example queries, explicit feedback, diagnostic export, and coordinated local-data deletion. It exposes no mail content, address, URL, attachment name, feature vector, fingerprint, key, ciphertext, path, or exception text, and it creates no database/key during empty reads. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only; it cannot add samples or request diagnostics and still displays only the four-field projection. With no model adapter or when calibration/storage fails, detection still returns the deterministic rule result. Phase 5B now supplies a public-key-derived stable development extension ID, a pinned development-only PyInstaller build command, SHA-256 build metadata, and safe current-user Chrome/Edge install/check/uninstall scripts. This environment has no offline PyInstaller, so no Host executable was built, no default browser registration was written, and real Chrome/Edge acceptance remains outstanding. There is still no production ONNX Runtime adapter, formal model, desktop UI, tray application, charting layer, or `.eml` intake in this repository.
+The production package currently provides a fully offline Local Detection Service, Feature Schema 2.0 validation, local structured-rule evaluation, the Detection Kernel, deterministic risk fusion, Model Assessment validation, a stable Local Inference seam, a side-effect-free `UnavailableModelAdapter`, strict Native Messaging framing/payload validation, and a testable Host loop. Phase 6A adds a strict Endpoint Evidence Record, current-user `%LOCALAPPDATA%` storage, a random DPAPI-protected data key, per-record AES-256-GCM, minimal SQLite indexes, fifteen-day cleanup, and explicit all-data deletion. Phase 6B adds an explicit-confirmation-only per-user example library, a separate DPAPI-protected random key, AES-256-GCM records, per-user HMAC fingerprints, conflict-aware bounded queries, and conservative exact/approximate calibration that cannot cancel strong rules or create critical risk alone. Phase 6C adds caller-confirmed, caller-path-selected diagnostics export with aggregate-only store queries, fixed safe ZIP entries, bounded sanitized statistics, coarse compatibility data, SHA-256 payload manifests, current-user temporary cleanup, and default no-overwrite behavior. Phase 7A adds the versioned immutable console ViewModels and the deep `PersonalConsoleService` boundary. Phase 7B.1 adds a PySide6 Essentials desktop entry, presenter, lifecycle seam, compact dashboard, lightweight custom-painted charts, paged recent events, sanitized details, and tray open/hide/exit behavior. The UI only consumes `PersonalConsoleService`; it has no storage, crypto, network, server, mutation, or `.eml` capability, and the core package remains importable without PySide6. The standalone development MV3 extension under `endpoint_agent/extension/` uses a chinaccs-specific Mail Intake adapter and Native Messaging only. With no model adapter or when calibration/storage fails, detection still returns the deterministic rule result. Phase 5B supplies a stable development extension ID and packaging/registration preparation, but this environment still has no offline PyInstaller-built Host, default browser registration, or real Chrome/Edge acceptance. There is also no production ONNX Runtime adapter, formal model, startup registration, desktop write interaction, or `.eml` intake.
 
 ## Product Definition
 
@@ -146,7 +146,7 @@ Risk Fusion combines deterministic evidence, Model Assessment, and bounded simil
 - Explicit all-data deletion applies SQLite secure deletion, truncates/removes owned sidecars and temporary files, and deletes the protected data key.
 - Tampering, damaged keys, incompatible schema, and decryption failures return no partial record.
 - Storage never uploads data and storage failure never blocks the detection projection.
-- `cryptography==49.0.0` and its transitive runtime wheels must be supplied from an approved offline build cache; the Agent never downloads them.
+- `cryptography==49.0.0`, `PySide6-Essentials==6.8.3`, `tzdata==2026.3`, and their transitive runtime wheels must be supplied from an approved offline build cache; the Agent never downloads them. On Windows, the pinned `tzdata` package supplies the IANA database required for named time zones and local calendar boundaries.
 
 ### Confirmed Example Library
 
@@ -235,15 +235,14 @@ The target is approximately 500 MB, not the 2 GB maximum. The maximum exists as 
 ### Tray And Personal Console
 
 - Agent and model status.
-- Drag-and-drop `.eml` detection.
 - Today's detection count.
 - Fifteen-day detection trend.
 - Risk distribution and intake-source distribution.
-- Model abstention and degradation counts.
-- Local 15-day evidence history.
-- Confirmed Example Library management.
-- False-positive and missed-phishing feedback.
-- Sanitized diagnostic export and local-data deletion.
+- Model abstention, model failure and rules-only degradation counts.
+- Paged local 15-day evidence history and sanitized event details.
+- Tray actions to open, hide and explicitly exit; closing the window hides it to the tray.
+
+Phase 7B.2 retains startup registration and write interactions. Phase 7C retains drag-and-drop `.eml` detection. Neither is implemented by Phase 7B.1.
 
 ## Attachment Safety
 

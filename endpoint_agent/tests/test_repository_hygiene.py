@@ -44,6 +44,11 @@ class RepositoryHygieneTests(unittest.TestCase):
             with self.subTest(path=relative_path):
                 self.assert_endpoint_path_is_ignored(relative_path)
 
+    def test_ui_development_environment_is_ignored(self):
+        self.assert_endpoint_path_is_ignored(
+            "endpoint_agent/.venv-ui/Scripts/python.exe"
+        )
+
     def test_local_keys_are_ignored(self):
         self.assert_endpoint_path_is_ignored(
             "endpoint_agent/local/keys/evidence.key"

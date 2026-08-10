@@ -427,7 +427,7 @@ Status: complete
 
 ### Phase 3：文本编码模型
 
-Status: complete
+Status: pending
 
 本阶段因 Approved Training Corpus 尚不存在而被有意暂缓，不是已经完成，也不能用 Phase 2 合成 ONNX 或 Phase 4A 的模型接口替代。正式模型选择、训练、量化、发布指标和最低硬件验证仍全部属于本阶段及其发布门禁。
 
@@ -559,7 +559,7 @@ Phase 6 总完成条件已满足：Phase 6A、Phase 6B 与 Phase 6C 全部完成
 
 ### Phase 7：托盘、个人控制台和数据看板
 
-Status: in_progress
+Status: complete
 
 #### Phase 7A：个人控制台应用服务与数据 ViewModel
 
@@ -576,7 +576,7 @@ Status: complete
 
 #### Phase 7B：Windows 托盘和桌面控制台 UI
 
-Status: in_progress
+Status: complete
 
 ##### Phase 7B.1：Windows 托盘与只读个人安全控制台
 
@@ -607,7 +607,7 @@ Status: complete
 
 #### Phase 7C：安全 `.eml` 拖入检测
 
-Status: in_progress
+Status: complete
 
 ##### Phase 7C.1：安全、显式、本地 `.eml` 读取与检测内核
 
@@ -618,12 +618,15 @@ Status: complete
 
 ##### Phase 7C.2：安全 `.eml` 拖入 UI
 
-Status: pending
+Status: complete
 
-- 后续只通过 Phase 7C.1 interface 接入拖入或文件选择交互；不得让 UI 接触 MIME 实现。
-- 不复用浏览器作为控制台，不扩展为目录扫描、邮件客户端 adapter、跨用户、管理员或中心后台功能。
+- 已通过 Phase 7C.1 `LocalMailIntakeService` interface 接入一个 Qt 本地文件 URL 拖入和受 `.eml` 筛选的文件选择；UI 不导入 MIME、Feature Pipeline、存储或加密实现。
+- 拖入或选择只产生临时选择，用户每次都必须确认本地处理、不上传、不打开/预览/解压/执行附件及只保存加密结构化结果；取消不读取文件。
+- 已使用单个受控 `QThread` 在非 UI 线程执行检测，同时最多一个任务；检测期间禁用拖入/选择，窗口退出等待任务自然完成或丢弃 UI 回调，不强制终止解析。
+- 成功只显示风险等级、检测状态、通用建议和本地事件 ID，并刷新 Dashboard 与最近事件；固定错误文案不包含路径、文件名、异常或内部实现。
+- 已在真实 Windows Qt 下检查 1366x768 初始页和 1024x720 待确认、运行、完成、文件过大状态；不复用浏览器作为控制台，也未扩展目录扫描、邮件客户端 adapter、跨用户、管理员或中心后台功能。
 
-Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7B 与 Phase 7C.1 已完成；Phase 7C.2 保持 `pending`，Phase 7C 和 Phase 7 均保持 `in_progress`。
+Phase 7 总完成条件已满足：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠，本地 `.eml` 检测不阻塞 Qt 主线程，数据全部来自当前用户本地加密记录。
 
 ### Phase 8：Endpoint Release
 
@@ -705,4 +708,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已完成。Phase 7 保持 `in_progress`：Phase 7B 与 Phase 7C.1 已完成；Phase 7C.2 保持 `pending`，所以 Phase 7C 保持 `in_progress`。
+Phase 6 与 Phase 7 已完成。Phase 7C.1 和 Phase 7C.2 均保持 `complete`；Phase 8 保持 `pending`，桌面邮件客户端 adapter 仍属于 Phase 9。

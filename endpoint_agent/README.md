@@ -4,9 +4,9 @@ This directory contains the design and, later, the implementation of the standal
 
 ## Current Implementation Status
 
-Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 is `complete`. Phase 7 is `in_progress`: Phase 7B is complete; Phase 7C is `in_progress`, with Phase 7C.1 explicit local `.eml` intake complete and Phase 7C.2 drag-and-drop UI pending.
+Phase 4 is `in_progress`: model-neutral Phase 4A and local-detection prerequisite Phase 4A.1 are complete, while production-model Phase 4B remains pending. Phase 3 is intentionally deferred because no Approved Training Corpus or release-eligible Unified Model Release exists. Phase 5 is `in_progress`: Phase 5A is complete and Phase 5B is `in_progress`. Phase 6 and Phase 7 are `complete`; Phase 7C.1 provides explicit local `.eml` intake and Phase 7C.2 provides the confirmed, non-blocking drag-and-file-selection desktop interaction.
 
-The production package provides offline detection, encrypted evidence, a Confirmed Example Library, sanitized diagnostic export, and explicit, confirmed reading of one local `.eml`. Intake is bounded, read-only, inert, and metadata-only for attachments; it neither retains the original message nor adds HTTP, telemetry, upload, update, or plugin-protocol capability.
+The production package provides offline detection, encrypted evidence, a Confirmed Example Library, sanitized diagnostic export, and explicit, confirmed reading of one local `.eml` through the desktop console. Intake is bounded, read-only, inert, non-blocking, and metadata-only for attachments; it neither retains the original message nor adds HTTP, telemetry, upload, update, or plugin-protocol capability.
 
 ## Product Definition
 
@@ -242,7 +242,7 @@ The target is approximately 500 MB, not the 2 GB maximum. The maximum exists as 
 - Paged local 15-day evidence history and sanitized event details.
 - Tray actions to open, hide and explicitly exit; closing the window hides it to the tray.
 
-Phase 7B.2A provides startup and safe local-data interactions. Phase 7B.2B provides explicit benign/phishing confirmation without exposing a FeatureVector to the desktop. Phase 7C.1 provides the non-UI `SafeEmlReader` and `LocalMailIntakeService` seams; Phase 7C.2 retains drag-and-drop UI work.
+Phase 7B.2A provides startup and safe local-data interactions. Phase 7B.2B provides explicit benign/phishing confirmation without exposing a FeatureVector to the desktop. Phase 7C.1 provides the non-UI `SafeEmlReader` and `LocalMailIntakeService` seams; Phase 7C.2 adds one-file local URL drag/drop and `.eml` selection, a fresh confirmation dialog, a single controlled Qt worker, fixed safe errors, and the four-field minimal result. Desktop mail-client adapters remain Phase 9 work.
 
 ## Attachment Safety
 

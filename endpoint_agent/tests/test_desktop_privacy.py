@@ -17,6 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 DESKTOP_SOURCES = (
     "desktop_presenter.py",
     "desktop_lifecycle.py",
+    "desktop_mail_intake.py",
     "desktop_qt.py",
     "desktop_app.py",
 )
@@ -33,6 +34,9 @@ class DesktopPrivacyTests(unittest.TestCase):
             "example_store",
             "key_protection",
             "local_data_commands",
+            "safe_eml_intake",
+            "feature_pipeline",
+            "pending_confirmation_store",
             "sqlite3",
             "cryptography",
         }
@@ -57,7 +61,7 @@ class DesktopPrivacyTests(unittest.TestCase):
                 self.assertTrue(imports.isdisjoint(forbidden_modules), imports)
                 self.assertTrue(attributes.isdisjoint(forbidden_mutations), attributes)
 
-    def test_desktop_production_sources_have_no_network_or_eml_capability(self):
+    def test_desktop_production_sources_have_no_network_or_mime_parser_capability(self):
         sources = "\n".join(
             (SOURCE_ROOT / filename).read_text(encoding="utf-8").casefold()
             for filename in DESKTOP_SOURCES
@@ -76,12 +80,54 @@ class DesktopPrivacyTests(unittest.TestCase):
             "uvicorn",
             "import email",
             "mailparser",
-            ".eml",
             "telemetry",
             "upload",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, sources)
+
+    def test_desktop_mail_intake_has_no_parser_store_or_file_content_capability(self):
+        source = (SOURCE_ROOT / "desktop_mail_intake.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source, filename="desktop_mail_intake.py")
+        names = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+        }
+        attributes = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+        }
+        forbidden_names = {
+            "MailObservation",
+            "FeaturePipeline",
+            "EvidenceStore",
+            "PendingConfirmationStore",
+            "SafeEmlReader",
+            "BytesParser",
+            "open",
+        }
+        forbidden_attributes = {
+            "read",
+            "read_bytes",
+            "read_text",
+            "write_bytes",
+            "write_text",
+            "copy",
+            "extract",
+            "extractall",
+            "startDetached",
+        }
+        self.assertTrue(names.isdisjoint(forbidden_names), names & forbidden_names)
+        self.assertTrue(
+            attributes.isdisjoint(forbidden_attributes),
+            attributes & forbidden_attributes,
+        )
+        self.assertNotIn("MailObservation(", source)
+        self.assertNotIn("subprocess", source)
 
     def test_core_package_import_succeeds_when_pyside_is_blocked(self):
         source_root = ENDPOINT_ROOT / "src"
@@ -195,6 +241,45 @@ class DesktopRuntimePrivacyTests(unittest.TestCase):
             QApplication.processEvents()
 
         socket_constructor.assert_not_called()
+        bundle.lifecycle.quit_application()
+
+    def test_real_qt_local_intake_creates_no_subprocess(self):
+        from test_desktop_presenter import PagingConsoleService, make_dashboard
+        from shielddome_endpoint.console_models import (
+            ConsoleOperationResult,
+            ConsoleStatusCode,
+        )
+        from shielddome_endpoint.desktop_qt import create_desktop_application
+
+        service = PagingConsoleService(
+            ConsoleOperationResult(
+                ConsoleStatusCode.SUCCESS,
+                make_dashboard(today_count=0),
+            ),
+            (),
+        )
+        with (
+            patch.object(
+                subprocess,
+                "Popen",
+                side_effect=AssertionError("desktop UI attempted subprocess"),
+            ) as popen,
+            patch.object(
+                subprocess,
+                "run",
+                side_effect=AssertionError("desktop UI attempted subprocess"),
+            ) as run,
+        ):
+            bundle = create_desktop_application(
+                service=service,
+                mail_intake_service=object(),
+                show=False,
+                enable_tray=False,
+            )
+            QApplication.processEvents()
+
+        popen.assert_not_called()
+        run.assert_not_called()
         bundle.lifecycle.quit_application()
 
 

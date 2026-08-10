@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6**、**Phase 7A**、完整的 **Phase 7B** 与 **Phase 7C.1：安全、显式、本地 `.eml` 读取与检测内核**。Phase 7C.2 保持 `pending`，因此 Phase 7C 与 Phase 7 均保持 `in_progress`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6** 与完整的 **Phase 7**，包括 **Phase 7C.1：安全、显式、本地 `.eml` 读取与检测内核** 和 **Phase 7C.2：安全 `.eml` 拖入、文件选择与非阻塞桌面交互**。Phase 8 保持 `pending`；桌面邮件客户端 adapter 仍属于 Phase 9。
 
 现有生产包只包含：
 
@@ -53,6 +53,7 @@
 - 只经服务执行的显式样本确认、样本删除/清空、用户选路诊断导出和协调证据库/样本库/密钥/sidecar/临时文件的全部删除命令；
 - GUI 无关的 `PersonalConsolePresenter`、可测试 `DesktopLifecycle`，以及只调用 `PersonalConsoleService` 的 PySide6 Widgets 主窗口和 UI adapter；
 - 今日/15 天趋势/风险与来源分布/模型状态计数、最近事件分页和脱敏详情的只读桌面呈现，以及托盘打开/隐藏/显式退出和关闭窗口隐藏行为；
+- 只接受一个 Qt 本地 `.eml` URL 的拖入区、受筛选文件选择、每次显式本地处理确认、单任务 Qt worker、固定安全错误与只含风险/状态/建议/事件 ID 的最小结果；桌面 intake 只调用 `LocalMailIntakeService`，完成或失败后清除路径引用；
 - 使用 `QPainter` 的轻量图表、1024x720 最低布局、1366x768 默认验证，以及空库/损坏/降级固定状态边界；
 - `MODEL_ASSESSMENT_SCHEMA_VERSION = "1.0"` 与 `DETECTION_OUTCOME_SCHEMA_VERSION = "3.0"`。
 

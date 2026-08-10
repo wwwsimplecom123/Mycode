@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成 Phase 7B 与 Phase 7C.1；Phase 7C.2 保持 `pending`，因此 Phase 7C 与 Phase 7 均保持 `in_progress`。Phase 3、Phase 4B 与 Phase 5B 的既有状态不因本阶段改变。当前提供：
+当前仓库已完成 Phase 7B、Phase 7C.1 和 Phase 7C.2，因此 Phase 7C 与 Phase 7 均为 `complete`。Phase 3、Phase 4B 与 Phase 5B 的既有状态不因本阶段改变；Phase 8 保持 `pending`，桌面邮件客户端 adapter 仍属于 Phase 9。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -25,6 +25,9 @@
 - 从 `MailObservation` 到 `DetectionOutcome` 的固定内存链路 `LocalDetectionService.detect(...)`。
 - `SafeEmlReader.read_explicit(...)` 与 `LocalMailIntakeService.detect_file(...)`：只处理用户明确确认的单个普通本地 `.eml`，使用 25 MiB 文件上限、64 KiB Header 总上限、8 KiB 单行 Header、256 Part、16 层、64 附件、100 收件人、32 KiB 正文和 256 URL 上限。
 - HTML 仅由标准库做有界纯文本化；附件不解码、不解压、不打开、不预览、不写盘，嵌套邮件附件不递归；认证结果仅作为 Header 声明观察值。
+- “本地检测”桌面页只接受一个 Qt 本地 `.eml` URL，或通过只显示 `.eml` 的文件选择器临时选择一个文件；拖入/选择不会自动检测，也不长期显示或记忆绝对路径。
+- 每次检测都显示本地处理确认，明确不上传、不打开/预览/解压/执行附件及只保存加密结构化结果；确认后由单个受控 Qt worker 调用 `LocalMailIntakeService.detect_file(path, confirmed_by_user=True)`，不阻塞 UI 且同时最多处理一个文件。
+- 桌面结果只显示风险等级、检测状态、通用建议和本地事件 ID；完成后刷新 Dashboard 和最近事件，固定错误文案不回显路径、文件名、异常或内部实现。
 - 4 字节 little-endian + UTF-8 JSON Native Messaging 协议、严格 payload 白名单、集中资源上限和稳定错误码；
 - `run_native_host(input_stream, output_stream, handler)` BytesIO seam、固定开发 extension origin 与四字段最小结果；
 - `endpoint_agent/extension/` 下只匹配 `https://webmail.chinaccs.cn/*`、不含网络客户端、服务器地址或插件 Token 的独立 MV3 插件。
@@ -47,7 +50,7 @@
 - 当前用户本地时区今日统计、15 天补零趋势、风险/来源/模型拒判/故障/纯规则降级统计，以及有界事件和样本查询；
 - 只经服务执行的明确样本确认、样本删除/清空、用户选路诊断导出和协调全部本地数据删除命令。
 
-生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam、Phase 6 的加密证据/明确确认样本库/有限校准/一次性脱敏诊断导出，以及 Phase 7A 的个人控制台服务边界。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会解析 `.eml`、加载生产模型或提供桌面 UI/托盘/图表；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实，不能触发诊断导出或获得包内容/路径。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
+生产包 `shielddome_endpoint` 负责 Phase 0–1 契约/特征/Corpus 治理、Phase 4A/4A.1 本地检测链路、Phase 5A Native Messaging protocol/Host seam、Phase 6 的加密证据/明确确认样本库/有限校准/一次性脱敏诊断导出，以及 Phase 7 的个人控制台、托盘和安全 `.eml` 桌面交互。Phase 2 能力和 PyInstaller 都只存在于开发侧，不会进入生产 Wheel。当前不会加载生产模型；插件只从已打开的 chinaccs 邮件详情页读取专用 DOM 事实，不能触发诊断导出或获得包内容/路径。当前环境没有可离线使用的 PyInstaller，因此尚未生成 Host `.exe`，没有写入默认 Chrome/Edge 注册，也没有完成真实浏览器验收。
 
 ## 2. 环境要求
 
@@ -480,7 +483,7 @@ $env:PYTHONPATH = (Resolve-Path endpoint_agent\src)
 
 主窗口只显示 Phase 7A 真实 ViewModel：今日检测数量、15 天补零趋势、风险/来源分布、模型拒判/故障/纯规则降级数量、最近事件分页和脱敏详情。托盘显示本地 Agent 状态并提供打开、隐藏、退出；普通关闭窗口只隐藏到托盘。空库、损坏存储和降级均显示固定安全状态，不呈现异常文本。
 
-UI/Presenter 不直接导入 SQLite、EvidenceStore、ExampleStore、DPAPI、AES-GCM、密钥或密文；7B.2A 写操作只通过 `PersonalConsoleService`。界面不提供误报/漏报确认或 `.eml` 入口，也不创建网络连接或监听端口。核心包没有 PySide6 时仍可导入。
+UI/Presenter 不直接导入 SQLite、EvidenceStore、ExampleStore、DPAPI、AES-GCM、密钥或密文；7B.2A 写操作只通过 `PersonalConsoleService`。Phase 7C.2 的桌面 intake 只调用 `LocalMailIntakeService`，不接触 MIME parser、Feature Pipeline、存储或 `MailObservation` 构造；界面不创建网络连接或监听端口。核心包没有 PySide6 时仍可导入。
 
 ### 7.5 当前用户启动与本地数据管理
 
@@ -492,11 +495,16 @@ Phase 7B.2A 增加“已确认样本”和“本地数据”页面。样本表�
 
 Phase 7B.2B 已完成：可信 Local Detection/Native Host 在检测时把通过隐私扫描的 `FeatureVector` 写入独立 Pending Confirmation Context。该存储使用当前用户独立 DPAPI 密钥和逐记录 AES-256-GCM，明文索引仅含事件 ID、版本和过期时间，最长保留 15 天。事件详情的“确认正常/确认钓鱼”必须先显示确认对话框；桌面只提交事件 ID、目标标签和明确确认，不接收向量或 fingerprint。样本写入成功后上下文立即删除，写入失败时保留；不存在、过期、损坏或不可用状态只显示固定提示。
 
-真实 Windows Qt 截图保存在被忽略的验证目录：
+真实 Windows Qt 截图保存在被忽略的验证目录；Phase 7C.2 另包含初始、待确认、运行、完成和文件过大状态：
 
 ```text
 endpoint_agent/dist/phase7b1/screenshots/1366x768.png
 endpoint_agent/dist/phase7b1/screenshots/1024x720.png
+endpoint_agent/dist/phase7c2/screenshots/1366x768-initial.png
+endpoint_agent/dist/phase7c2/screenshots/1024x720-selected-confirmation.png
+endpoint_agent/dist/phase7c2/screenshots/1024x720-running.png
+endpoint_agent/dist/phase7c2/screenshots/1024x720-complete.png
+endpoint_agent/dist/phase7c2/screenshots/1024x720-file-too-large.png
 ```
 
 ## 8. Corpus Governance
@@ -768,9 +776,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- Phase 7C.2 的安全 `.eml` 拖入 UI、文件选择器或其他邮件客户端 adapter。
+- Phase 8 Endpoint Release 安装、升级、ACL、完整性和回滚。
+- Phase 9 的 Windows 右键检测和 Outlook、Foxmail、QQ 邮箱等桌面邮件客户端 adapter。
 
-Phase 3 继续受 Approved Training Corpus 阻塞并保持 `pending`。Phase 6 与 Phase 7B 已完成。Phase 7C.1 已完成，Phase 7C.2 保持 `pending`，因此 Phase 7C 与 Phase 7 均保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受 Approved Training Corpus 阻塞并保持 `pending`。Phase 6、Phase 7B、Phase 7C.1、Phase 7C.2、Phase 7C 与 Phase 7 已完成。Phase 8 保持 `pending`；正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞，桌面邮件客户端 adapter 仍属于 Phase 9。
 
 ## 14. 修改后的最低验证
 

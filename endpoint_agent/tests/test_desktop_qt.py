@@ -151,7 +151,7 @@ class DesktopQtTests(unittest.TestCase):
         QApplication.processEvents()
         self.assertEqual(
             bundle.window.findChild(QStackedWidget, "contentPages").currentIndex(),
-            1,
+            2,
         )
 
         bundle.window.close()
@@ -201,6 +201,58 @@ class DesktopQtTests(unittest.TestCase):
         actions[5].trigger()
         QApplication.processEvents()
         self.assertTrue(bundle.lifecycle.is_quitting)
+
+    def test_local_detection_page_is_compact_at_minimum_size(self):
+        from test_desktop_presenter import PagingConsoleService, make_dashboard
+        from shielddome_endpoint.console_models import (
+            ConsoleOperationResult,
+            ConsoleStatusCode,
+        )
+        from shielddome_endpoint.desktop_qt import create_desktop_application
+
+        class MailIntake:
+            def detect_file(self, path, *, confirmed_by_user):
+                raise AssertionError("selection_not_confirmed")
+
+        service = PagingConsoleService(
+            ConsoleOperationResult(
+                ConsoleStatusCode.SUCCESS,
+                make_dashboard(today_count=0),
+            ),
+            (),
+        )
+        bundle = create_desktop_application(
+            service=service,
+            mail_intake_service=MailIntake(),
+            show=False,
+            enable_tray=False,
+        )
+        bundle.window.resize(1024, 720)
+        bundle.window.show()
+        bundle.window.findChild(QPushButton, "localIntakeNav").click()
+        QApplication.processEvents()
+
+        pages = bundle.window.findChild(QStackedWidget, "contentPages")
+        drop_zone = bundle.window.findChild(QWidget, "emlDropZone")
+        state_region = bundle.window.findChild(QWidget, "mailIntakeStateRegion")
+        self.assertEqual(pages.currentIndex(), 1)
+        self.assertLess(drop_zone.height(), pages.height() // 2)
+        self.assertGreaterEqual(drop_zone.height(), 132)
+        self.assertTrue(state_region.isVisible())
+        for name in (
+            "selectEmlButton",
+            "openRecentEventsButton",
+            "mailIntakeStatus",
+            "mailRiskValue",
+            "mailDetectionValue",
+            "mailAdviceValue",
+            "mailEventIdValue",
+        ):
+            self.assertIsNotNone(bundle.window.findChild(QWidget, name), name)
+        self.assertLessEqual(drop_zone.geometry().bottom(), state_region.geometry().top())
+
+        bundle.lifecycle.quit_application()
+        QApplication.processEvents()
 
 
 if __name__ == "__main__":

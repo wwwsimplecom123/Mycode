@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from .desktop_lifecycle import CloseDisposition, DesktopLifecycle
+from .desktop_mail_intake import DesktopMailIntakePanel
 from .desktop_presenter import (
     ChartValue,
     DesktopConsoleState,
@@ -203,6 +204,24 @@ class DistributionChart(QWidget):
 
 
 class QtDialogAdapter:
+    def choose_eml_path(self, parent) -> str | None:
+        path, _ = QFileDialog.getOpenFileName(
+            parent,
+            "选择 EML 邮件文件",
+            "",
+            "EML 邮件 (*.eml *.EML)",
+        )
+        return path or None
+
+    def confirm_mail_intake(self, parent) -> bool:
+        return self.confirm(
+            parent,
+            "开始本地检测",
+            "邮件只在本机处理，不会上传。\n\n"
+            "ShieldDome 不会打开、预览、解压或执行附件；"
+            "检测后只保存加密结构化结果。\n\n确认开始检测？",
+        )
+
     def choose_diagnostic_path(self, parent) -> str | None:
         path, _ = QFileDialog.getSaveFileName(parent, "导出诊断包", "", "ZIP 文件 (*.zip)")
         return path or None
@@ -218,11 +237,12 @@ class QtDialogAdapter:
 class ShieldDomeMainWindow(QMainWindow):
     statusChanged = Signal(str, str)
 
-    def __init__(self, presenter: PersonalConsolePresenter, *, startup_manager: object, dialogs: object) -> None:
+    def __init__(self, presenter: PersonalConsolePresenter, *, mail_intake_service: object, startup_manager: object, dialogs: object) -> None:
         super().__init__()
         self._presenter = presenter
         self._startup_manager = startup_manager
         self._dialogs = dialogs
+        self._mail_intake_service = mail_intake_service
         self._lifecycle: DesktopLifecycle | None = None
         self._rendering = False
         self.setObjectName("shieldDomeMainWindow")
@@ -247,6 +267,7 @@ class ShieldDomeMainWindow(QMainWindow):
         self._pages.setObjectName("contentPages")
         root_layout.addWidget(self._build_navigation())
         self._pages.addWidget(self._build_overview_page())
+        self._pages.addWidget(self._build_local_intake_page())
         self._pages.addWidget(self._build_events_page())
         self._pages.addWidget(self._build_examples_page())
         self._pages.addWidget(self._build_local_data_page())
@@ -276,13 +297,15 @@ class ShieldDomeMainWindow(QMainWindow):
         self._nav_group.setExclusive(True)
         self._overview_nav = QPushButton("安全概览")
         self._overview_nav.setObjectName("overviewNav")
+        self._local_intake_nav = QPushButton("本地检测")
+        self._local_intake_nav.setObjectName("localIntakeNav")
         self._events_nav = QPushButton("最近事件")
         self._events_nav.setObjectName("eventsNav")
         self._examples_nav = QPushButton("已确认样本")
         self._examples_nav.setObjectName("examplesNav")
         self._local_data_nav = QPushButton("本地数据")
         self._local_data_nav.setObjectName("localDataNav")
-        for index, button in enumerate((self._overview_nav, self._events_nav, self._examples_nav, self._local_data_nav)):
+        for index, button in enumerate((self._overview_nav, self._local_intake_nav, self._events_nav, self._examples_nav, self._local_data_nav)):
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             self._nav_group.addButton(button, index)
@@ -295,6 +318,26 @@ class ShieldDomeMainWindow(QMainWindow):
         privacy.setWordWrap(True)
         layout.addWidget(privacy)
         return navigation
+
+    def _build_local_intake_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("localIntakePage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 18, 24, 16)
+        layout.setSpacing(10)
+        header, _ = self._page_header(
+            "本地检测",
+            "单个 EML 邮件文件 · 确认后仅在本机处理",
+        )
+        layout.addWidget(header)
+        self._mail_intake_panel = DesktopMailIntakePanel(
+            self._mail_intake_service,
+            dialogs=self._dialogs,
+            refresh_callback=self.refresh_dashboard,
+            open_events_callback=lambda: self._events_nav.click(),
+        )
+        layout.addWidget(self._mail_intake_panel, 1)
+        return page
 
     def _page_header(self, title: str, subtitle: str) -> tuple[QWidget, QLabel]:
         header = QWidget()
@@ -664,7 +707,7 @@ class ShieldDomeMainWindow(QMainWindow):
         self.setStyleSheet(
             f"""
             QWidget {{ color: {INK}; font-family: 'Segoe UI'; font-size: 13px; }}
-            #rootSurface, #overviewPage, #eventsPage {{ background: {PAPER}; }}
+            #rootSurface, #overviewPage, #localIntakePage, #eventsPage, #examplesPage, #localDataPage {{ background: {PAPER}; }}
             #navigationRail {{ background: {GRAPHITE}; border: none; }}
             #brandLabel {{ color: #FFFFFF; font-family: 'Segoe UI Variable Display'; font-size: 17px; font-weight: 700; letter-spacing: 2px; }}
             #brandSubtitle {{ color: #AEBAB9; font-family: 'Cascadia Mono'; font-size: 9px; }}
@@ -699,6 +742,17 @@ class ShieldDomeMainWindow(QMainWindow):
             #detailHint {{ color: {MUTED}; font-size: 11px; }}
             #detailPanel QLabel[detailValue='true'] {{ font-family: 'Cascadia Mono'; font-size: 11px; color: {INK}; }}
             #pageLabel {{ color: {MUTED}; font-family: 'Cascadia Mono'; font-size: 11px; }}
+            #emlDropZone {{ border: 1px dashed #8FA29E; background: #F8F9F7; border-radius: 3px; }}
+            #emlDropZone:disabled {{ border-color: #C8CECB; background: #ECEFEC; }}
+            #dropZoneTitle {{ font-family: 'Segoe UI Variable Display'; font-size: 17px; font-weight: 650; }}
+            #dropZoneDetail, #mailSelectionSummary, #mailIntakePrivacy {{ color: {MUTED}; font-size: 11px; }}
+            #selectEmlButton, #openRecentEventsButton {{ border: 1px solid #9DABA7; background: #FFFFFF; padding: 7px 14px; border-radius: 3px; }}
+            #selectEmlButton:hover, #openRecentEventsButton:hover {{ border-color: {SIGNAL_TEAL}; color: {SIGNAL_TEAL}; }}
+            #mailIntakeStateRegion {{ border-top: 1px solid {RULE}; border-bottom: 1px solid {RULE}; }}
+            #mailIntakeStatus {{ font-size: 16px; font-weight: 650; color: {SIGNAL_TEAL}; }}
+            #mailIntakeStatus[mailTone='warning'] {{ color: {WARNING}; }}
+            #mailResultLabel {{ color: {MUTED}; font-size: 11px; }}
+            QLabel[mailResultValue='true'] {{ font-family: 'Cascadia Mono'; font-size: 12px; color: {INK}; }}
             """
         )
 
@@ -860,6 +914,9 @@ class ShieldDomeMainWindow(QMainWindow):
         else:
             event.ignore()
 
+    def shutdown_mail_intake(self) -> None:
+        self._mail_intake_panel.shutdown()
+
 
 class QtDesktopAdapter:
     def __init__(
@@ -931,6 +988,7 @@ def create_shield_icon() -> QIcon:
 def create_desktop_application(
     service: object | None = None,
     *,
+    mail_intake_service: object | None = None,
     show: bool = True,
     enable_tray: bool = True,
     startup_manager: object | None = None,
@@ -944,9 +1002,14 @@ def create_desktop_application(
         from .console_service import PersonalConsoleService
 
         service = PersonalConsoleService()
+    if mail_intake_service is None:
+        from .local_mail_intake import LocalMailIntakeService
+
+        mail_intake_service = LocalMailIntakeService()
     presenter = PersonalConsolePresenter(service)
     window = ShieldDomeMainWindow(
         presenter,
+        mail_intake_service=mail_intake_service,
         startup_manager=startup_manager or WindowsStartupManager(),
         dialogs=dialogs or QtDialogAdapter(),
     )
@@ -970,6 +1033,7 @@ def create_desktop_application(
     adapter = QtDesktopAdapter(application, window, tray, tray_status_action)
     lifecycle = DesktopLifecycle(adapter)
     window.set_lifecycle(lifecycle)
+    application.aboutToQuit.connect(window.shutdown_mail_intake)
     window.statusChanged.connect(adapter.update_tray_status)
     current = presenter.state.agent_status
     adapter.update_tray_status(current.title, current.detail)

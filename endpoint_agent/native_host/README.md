@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\b
 
 The build requires the pinned development-only PyInstaller dependency in `requirements-packaging.txt`; it never enters the production Wheel. Output and SHA-256 metadata are written beneath ignored `endpoint_agent/dist/native-host/`. If PyInstaller is unavailable offline, do not download it implicitly or claim the Host was built.
 
-After a successful build, use `install-host.ps1`, `check-host.ps1`, and `uninstall-host.ps1`. They default to current-user Chrome and Edge Native Messaging keys, generate separate manifests with the real absolute Host path, support repeated installation, and refuse to delete registration values that do not point to ShieldDome-owned manifests. They do not modify other browser settings or require administrator rights.
+After a successful build, use `install-host.ps1`, `check-host.ps1`, and `uninstall-host.ps1`. They default to current-user Chrome and Edge Native Messaging keys, generate separate manifests with the real absolute Host path, support repeated installation, refuse to overwrite same-name registration values or manifests that are not ShieldDome-owned, and refuse to delete registration values that do not point to ShieldDome-owned manifests. They do not modify other browser settings or require administrator rights.
 
 Real Chrome and Edge acceptance steps are in `docs/BROWSER_ACCEPTANCE.md`. In the current environment no Host `.exe` exists, so the checked-in development example is not registered and Phase 5B remains `in_progress`.
 

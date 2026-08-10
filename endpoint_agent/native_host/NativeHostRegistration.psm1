@@ -144,6 +144,32 @@ function Install-ShieldDomeNativeHost {
         [pscustomobject]@{ Browser = "Edge"; RegistryPath = $EdgeRegistryPath }
     )
     foreach ($registration in $registrations) {
+        $browserDirectory = Join-Path (Get-ShieldDomeFullPath -Path $ManifestRoot) $registration.Browser
+        $manifestPath = Join-Path $browserDirectory ("{0}.json" -f $build.identity.host_name)
+        if (Test-Path -LiteralPath $registration.RegistryPath) {
+            $registeredPath = [string](Get-Item -LiteralPath $registration.RegistryPath).GetValue("")
+            if ([string]::IsNullOrWhiteSpace($registeredPath) -or
+                (Get-ShieldDomeFullPath -Path $registeredPath) -ine (Get-ShieldDomeFullPath -Path $manifestPath)) {
+                throw "Refused to overwrite unowned $($registration.Browser) Native Messaging registration."
+            }
+        }
+        if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+            try {
+                $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ([string]$manifest.name -cne [string]$build.identity.host_name -or
+                    [string]$manifest.type -cne "stdio" -or
+                    @($manifest.allowed_origins).Count -ne 1 -or
+                    [string]@($manifest.allowed_origins)[0] -cne [string]$build.identity.extension_origin) {
+                    throw "unowned"
+                }
+            } catch {
+                throw "Refused to overwrite unowned $($registration.Browser) Native Messaging manifest."
+            }
+        } elseif (Test-Path -LiteralPath $registration.RegistryPath) {
+            throw "Refused to overwrite unowned $($registration.Browser) Native Messaging registration."
+        }
+    }
+    foreach ($registration in $registrations) {
         $manifestPath = New-ShieldDomeBrowserManifest -Browser $registration.Browser -ManifestRoot $ManifestRoot -Build $build
         New-Item -Path $registration.RegistryPath -Force | Out-Null
         Set-Item -LiteralPath $registration.RegistryPath -Value $manifestPath

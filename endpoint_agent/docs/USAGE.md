@@ -747,7 +747,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\c
 powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\uninstall-host.ps1
 ```
 
-脚本只使用两个 HKCU Native Messaging Host 键，不要求管理员权限；路径中的空格和中文由自动化测试覆盖。完整 Chrome/Edge 人工验收见 `docs/BROWSER_ACCEPTANCE.md`。
+脚本只使用两个 HKCU Native Messaging Host 键，不要求管理员权限；路径中的空格和中文由自动化测试覆盖。重复安装保持幂等；若同名注册或目标 manifest 不属于 ShieldDome，安装与卸载都会拒绝覆盖或删除。完整 Chrome/Edge 人工验收见 `docs/BROWSER_ACCEPTANCE.md`。
 
 ## 12. 数据和离线边界
 

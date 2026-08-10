@@ -222,6 +222,78 @@ class NativePackagingTests(unittest.TestCase):
             self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows registry ownership")
+    def test_install_refuses_to_overwrite_unowned_registry_value(self):
+        registry_root = (
+            "HKCU:\\Software\\ShieldDome\\EndpointAgentTests\\"
+            + uuid.uuid4().hex
+        )
+        chrome_registry = registry_root + "\\Chrome"
+        edge_registry = registry_root + "\\Edge"
+        try:
+            with TemporaryDirectory(prefix="ShieldDome Phase5B ") as temporary_directory:
+                root = Path(temporary_directory)
+                host_path, metadata_path = write_fake_build(root)
+                manifest_root = root / "manifests"
+                unrelated = root / "unrelated.json"
+                unrelated.write_text("{}", encoding="utf-8")
+                seed = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        (
+                            f"New-Item -Path '{chrome_registry}' -Force | Out-Null; "
+                            f"Set-Item -LiteralPath '{chrome_registry}' -Value '{unrelated}'"
+                        ),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(seed.returncode, 0, seed.stderr)
+
+                install = run_powershell(
+                    "install-host.ps1",
+                    "-HostPath", host_path,
+                    "-BuildMetadataPath", metadata_path,
+                    "-ManifestRoot", manifest_root,
+                    "-ChromeRegistryPath", chrome_registry,
+                    "-EdgeRegistryPath", edge_registry,
+                )
+
+                self.assertNotEqual(install.returncode, 0)
+                registered = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        f"[string](Get-Item -LiteralPath '{chrome_registry}').GetValue('')",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(registered.returncode, 0, registered.stderr)
+                self.assertEqual(registered.stdout.strip(), str(unrelated))
+                self.assertFalse(manifest_root.exists())
+        finally:
+            cleanup = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"if (Test-Path -LiteralPath '{registry_root}') {{ Remove-Item -LiteralPath '{registry_root}' -Recurse -Force }}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows registry ownership")
     def test_uninstall_refuses_unowned_registry_value(self):
         registry_root = (
             "HKCU:\\Software\\ShieldDome\\EndpointAgentTests\\"

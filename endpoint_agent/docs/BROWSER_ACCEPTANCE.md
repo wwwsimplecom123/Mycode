@@ -54,6 +54,8 @@ HKCU\Software\Microsoft\Edge\NativeMessagingHosts\cn.shielddome.endpoint_agent
 
 重复运行安装和检查命令，结果必须保持一致。
 
+若任一同名注册值或目标 manifest 已存在但不属于 ShieldDome，安装必须返回非零且不得覆盖；应先人工核对冲突来源，不能绕过所有权保护。
+
 ## 4. Chrome 验收
 
 1. 打开 `chrome://extensions`，启用“开发者模式”。

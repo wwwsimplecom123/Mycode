@@ -504,7 +504,7 @@ Status: in_progress
 
 - 已提交公开 manifest key 并固定开发验收扩展 ID `hchaloelgnennaojaiikeebhajcoccih`；该身份不等于未来商店或企业正式发布身份，仓库不保存私钥。
 - 已提供固定开发依赖的 PyInstaller one-file console Host 构建脚本，输出到被忽略的 `dist/native-host/` 并生成 SHA-256 build metadata；PyInstaller 不进入生产 Wheel。
-- 已提供实际绝对 Host 路径的 Chrome/Edge Native Host manifests 生成，以及当前用户 HKCU 安装、状态、重复安装和自有项卸载脚本。
+- 已提供实际绝对 Host 路径的 Chrome/Edge Native Host manifests 生成，以及当前用户 HKCU 安装、状态、重复安装和自有项卸载脚本；安装与卸载均拒绝覆盖或删除非 ShieldDome 自有的同名注册。
 - 已通过源码 Host 子进程 ping、最小检测、连续请求隔离、异常帧、stdout 隐私和零 TCP/UDP socket 自动化验证；打包 Host 的同一契约因当前环境没有 PyInstaller/`.exe` 而明确跳过。
 - 已通过隔离 ShieldDome 测试注册表路径的 Chrome/Edge manifest、中文/空格路径、幂等安装/卸载和拒绝删除非自有注册项测试。
 - 仍需在具备批准的离线 PyInstaller 环境构建真实 `.exe`，再执行默认 Chrome/Edge 注册并分别完成真实 chinaccs 在线/断网/Network 面板验收；在这些证据齐全前本阶段保持 `in_progress`。

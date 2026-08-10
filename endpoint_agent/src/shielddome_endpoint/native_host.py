@@ -28,6 +28,11 @@ def _create_default_evidence_store():
     return EvidenceStore()
 
 
+def _create_default_pending_store():
+    from .pending_confirmation_store import PendingConfirmationStore
+    return PendingConfirmationStore()
+
+
 class NativeHostHandler:
     def __init__(
         self,
@@ -37,10 +42,13 @@ class NativeHostHandler:
         clock: Callable[[], datetime] | None = None,
         event_id_factory: Callable[[], str] | None = None,
         evidence_store_factory: Callable[[], object] | None = None,
+        pending_store_factory: Callable[[], object] | None = None,
     ) -> None:
         self._extension_origin = extension_origin
-        self._detection_service = (
-            detection_service or default_local_detection_service()
+        self._pending_store_factory = pending_store_factory or _create_default_pending_store
+        self._pending_store = None
+        self._detection_service = detection_service or default_local_detection_service(
+            feature_sink=self._save_pending_context
         )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._event_id_factory = event_id_factory or (
@@ -50,6 +58,16 @@ class NativeHostHandler:
             evidence_store_factory or _create_default_evidence_store
         )
         self._evidence_store = None
+
+    def _save_pending_context(self, local_event_id, feature_vector, detected_at):
+        if self._pending_store is None:
+            try: self._pending_store = self._pending_store_factory()
+            except Exception: return
+        try:
+            self._pending_store.cleanup_expired(now=detected_at)
+            self._pending_store.put(local_event_id, feature_vector, created_at=detected_at)
+        except Exception:
+            pass
 
     def __call__(self, message: dict[str, object]) -> dict[str, object]:
         if self._extension_origin != DEVELOPMENT_EXTENSION_ORIGIN:

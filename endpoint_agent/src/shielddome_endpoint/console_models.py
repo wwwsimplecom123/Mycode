@@ -59,6 +59,10 @@ class ConsoleStatusCode(StrEnum):
     DIAGNOSTIC_OUTPUT_EXISTS = "diagnostic_output_exists"
     DIAGNOSTIC_EXPORT_FAILED = "diagnostic_export_failed"
     LOCAL_DATA_DELETE_PARTIAL_FAILURE = "local_data_delete_partial_failure"
+    PENDING_CONTEXT_NOT_FOUND = "pending_context_not_found"
+    PENDING_CONTEXT_EXPIRED = "pending_context_expired"
+    PENDING_CONTEXT_CORRUPT = "pending_context_corrupt"
+    PENDING_CONTEXT_UNAVAILABLE = "pending_context_unavailable"
     COMMAND_FAILED = "command_failed"
 
 

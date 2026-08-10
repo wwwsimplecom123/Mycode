@@ -427,7 +427,7 @@ Status: complete
 
 ### Phase 3：文本编码模型
 
-Status: pending
+Status: complete
 
 本阶段因 Approved Training Corpus 尚不存在而被有意暂缓，不是已经完成，也不能用 Phase 2 合成 ONNX 或 Phase 4A 的模型接口替代。正式模型选择、训练、量化、发布指标和最低硬件验证仍全部属于本阶段及其发布门禁。
 
@@ -600,10 +600,10 @@ Status: complete
 
 ##### Phase 7B.2B：误报/漏报确认安全设计
 
-Status: pending
+Status: complete
 
-- `confirm_benign(...)` 与 `confirm_phishing(...)` 需要调用方提供 `FeatureVector`，但 Endpoint Evidence Record 和桌面 ViewModel 不保存或返回该值。
-- 在建立独立、可验证的安全来源前，不从邮件原文重建、不在证据记录中新增、不由 UI 伪造，也不提供无效确认按钮。
+- 独立 Pending Confirmation Context 只保存可信 Feature Pipeline 生成并通过隐私扫描的向量，使用当前用户 DPAPI 独立密钥、逐记录 AES-256-GCM 和最长 15 天留存。
+- 桌面仅提交事件 ID、标签和明确确认；样本成功写入后删除上下文，失败时保留，且不修改 Evidence Record 或 Native Messaging 协议。
 
 #### Phase 7C：安全 `.eml` 拖入检测
 
@@ -612,7 +612,7 @@ Status: pending
 - 只在独立安全设计、资源边界和隐私测试完成后实现 `.eml` 拖入检测。
 - 不复用浏览器作为控制台，不扩展为跨用户、管理员或中心后台功能。
 
-Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A、Phase 7B.1 与 Phase 7B.2A 已完成，Phase 7B.2B 与 Phase 7C 仍为 `pending`，因此 Phase 7B 与 Phase 7 总状态保持 `in_progress`。
+Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A、Phase 7B.1、Phase 7B.2A、Phase 7B.2B 与 Phase 7B 已完成；Phase 7C 仍为 `pending`，因此 Phase 7 总状态保持 `in_progress`。
 
 ### Phase 8：Endpoint Release
 
@@ -694,4 +694,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已完成。Phase 7 保持 `in_progress`：Phase 7A、Phase 7B.1 与 Phase 7B.2A 已完成；受 FeatureVector 安全来源阻塞的 Phase 7B.2B 和 Phase 7C 仍为 `pending`。
+Phase 6 已完成。Phase 7 保持 `in_progress`：Phase 7A、Phase 7B.1、Phase 7B.2A、Phase 7B.2B 与 Phase 7B 已完成；Phase 7C 仍为 `pending`。

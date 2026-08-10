@@ -207,6 +207,7 @@ class LocalDataCommandTests(unittest.TestCase):
             UserDataKeyManager,
         )
         from shielddome_endpoint.local_data_commands import LocalDataCommands
+        from shielddome_endpoint.pending_confirmation_store import PendingConfirmationStore
 
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -232,6 +233,9 @@ class LocalDataCommandTests(unittest.TestCase):
                         "confirmed_examples.sqlite3",
                     )
                 )
+                pending_store = PendingConfirmationStore(
+                    key_manager=manager(root / "pending", "pending.sqlite3")
+                )
                 evidence_store.put(make_record())
                 example_store.confirm(
                     make_vector(),
@@ -239,6 +243,7 @@ class LocalDataCommandTests(unittest.TestCase):
                     source=ExampleSource.BROWSER_NATIVE,
                     confirmed_at=NOW,
                 )
+                pending_store.put("event-pending-delete", make_vector(), created_at=NOW)
                 diagnostic_temp = root / "diagnostic-temp" / "export-real"
                 diagnostic_temp.mkdir(parents=True)
                 (diagnostic_temp / "package.diag.zip").write_bytes(b"temporary")
@@ -248,6 +253,7 @@ class LocalDataCommandTests(unittest.TestCase):
                     diagnostic_exporter=RecordingDiagnosticExporter(),
                     clock=lambda: NOW,
                     data_root=root,
+                    pending_confirmation_store=pending_store,
                 )
                 result = commands.delete_all_local_data(confirmed=True)
                 repeated = commands.delete_all_local_data(confirmed=True)
@@ -273,6 +279,8 @@ class LocalDataCommandTests(unittest.TestCase):
                 ),
                 example_store.key_path,
                 example_store.key_path.with_name(example_store.key_path.name + ".tmp"),
+                pending_store.database_path,
+                pending_store.key_path,
                 root / "diagnostic-temp",
             )
             for path in owned_paths:

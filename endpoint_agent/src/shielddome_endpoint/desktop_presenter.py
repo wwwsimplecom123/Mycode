@@ -307,6 +307,30 @@ class PersonalConsolePresenter:
         self._example_offset = 0
         return self._load_examples()
 
+    def _confirm_event(self, local_event_id: str, *, confirmed: bool, phishing: bool) -> DesktopConsoleState:
+        if confirmed is not True:
+            self._state = replace(self._state, operation_title="已取消确认", operation_body="未保存任何样本。")
+            return self._state
+        try:
+            method = self._service.confirm_event_phishing if phishing else self._service.confirm_event_benign
+            result = method(local_event_id, confirmed=True)
+            if result.code in {ConsoleStatusCode.EXAMPLE_ADDED, ConsoleStatusCode.EXAMPLE_DUPLICATE, ConsoleStatusCode.EXAMPLE_CONFLICT}:
+                self._load_examples()
+                self._state = replace(self._state, operation_title="确认已保存", operation_body="仅保存脱敏特征；邮件原文和附件未保存。")
+            elif result.code in {ConsoleStatusCode.PENDING_CONTEXT_NOT_FOUND, ConsoleStatusCode.PENDING_CONTEXT_EXPIRED}:
+                self._state = replace(self._state, operation_title="无法确认该事件", operation_body="待确认上下文不存在或已过期。")
+            else:
+                self._state = replace(self._state, operation_title="确认失败", operation_body="本地待确认数据暂时不可用，未删除可用上下文。")
+        except Exception:
+            self._state = replace(self._state, operation_title="确认失败", operation_body="本地待确认数据暂时不可用。")
+        return self._state
+
+    def confirm_event_benign(self, local_event_id: str, *, confirmed: bool) -> DesktopConsoleState:
+        return self._confirm_event(local_event_id, confirmed=confirmed, phishing=False)
+
+    def confirm_event_phishing(self, local_event_id: str, *, confirmed: bool) -> DesktopConsoleState:
+        return self._confirm_event(local_event_id, confirmed=confirmed, phishing=True)
+
     def next_examples(self) -> DesktopConsoleState:
         if self._state.examples.can_next:
             self._example_offset += DESKTOP_EXAMPLE_PAGE_SIZE

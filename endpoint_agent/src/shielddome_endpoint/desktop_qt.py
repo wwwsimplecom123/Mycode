@@ -794,9 +794,7 @@ class ShieldDomeMainWindow(QMainWindow):
             ("检测状态", detail.detection_status_text),
             ("操作建议", detail.generic_action_text),
             ("检测来源", detail.source_text),
-            ("模型状态", detail.model_status_text),
             ("错误代码", detail.error_code_text),
-            ("规则证据", "、".join(detail.rule_codes) if detail.rule_codes else "无"),
         )
         for label_text, value_text in rows:
             label = QLabel(label_text)
@@ -807,7 +805,35 @@ class ShieldDomeMainWindow(QMainWindow):
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self._detail_layout.addWidget(label)
             self._detail_layout.addWidget(value)
+        actions = QHBoxLayout()
+        benign = QPushButton("确认正常")
+        benign.setObjectName("confirmBenignButton")
+        phishing = QPushButton("确认钓鱼")
+        phishing.setObjectName("confirmPhishingButton")
+        benign.clicked.connect(lambda: self._confirm_selected_event(detail.local_event_id, False))
+        phishing.clicked.connect(lambda: self._confirm_selected_event(detail.local_event_id, True))
+        actions.addWidget(benign)
+        actions.addWidget(phishing)
+        self._detail_layout.addLayout(actions)
+        if state.operation_title:
+            confirmation_status = QLabel(
+                f"{state.operation_title}\n{state.operation_body or ''}"
+            )
+            confirmation_status.setObjectName("confirmationStatus")
+            confirmation_status.setWordWrap(True)
+            self._detail_layout.addWidget(confirmation_status)
         self._detail_layout.addStretch(1)
+
+    def _confirm_selected_event(self, local_event_id: str, phishing: bool) -> None:
+        label = "钓鱼" if phishing else "正常"
+        confirmed = self._dialogs.confirm(
+            self,
+            f"确认{label}",
+            f"将此事件确认标记为{label}？只保存脱敏特征，不保存邮件原文和附件。",
+        )
+        state = (self._presenter.confirm_event_phishing(local_event_id, confirmed=confirmed) if phishing else self._presenter.confirm_event_benign(local_event_id, confirmed=confirmed))
+        self.render_state(state)
+        self._render_examples(state)
 
     def _next_events(self) -> None:
         self.render_state(self._presenter.next_events())

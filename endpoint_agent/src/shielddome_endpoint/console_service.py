@@ -62,6 +62,7 @@ class PersonalConsoleService:
         local_timezone: tzinfo | None = None,
         example_id_factory: Callable[[], str] | None = None,
         local_data_commands: object | None = None,
+        pending_confirmation_store: object | None = None,
     ) -> None:
         self._evidence_store = evidence_store or EvidenceStore()
         self._example_store = example_store or ExampleStore()
@@ -71,6 +72,10 @@ class PersonalConsoleService:
             self._local_timezone = timezone.utc
         self._example_id_factory = example_id_factory or (lambda: uuid4().hex)
         self._example_command_targets: dict[str, tuple[str, ExampleLabel]] = {}
+        if pending_confirmation_store is None:
+            from .pending_confirmation_store import PendingConfirmationStore
+            pending_confirmation_store = PendingConfirmationStore()
+        self._pending_confirmation_store = pending_confirmation_store
         if local_data_commands is not None:
             self._commands = local_data_commands
         else:
@@ -88,6 +93,7 @@ class PersonalConsoleService:
                 ),
                 clock=self._clock,
                 data_root=default_user_data_directory(),
+                pending_confirmation_store=self._pending_confirmation_store,
             )
 
     def _now_utc(self) -> datetime:
@@ -514,6 +520,33 @@ class PersonalConsoleService:
             )
         except Exception:
             return ConsoleOperationResult(ConsoleStatusCode.COMMAND_FAILED, None)
+
+    def _confirm_event(self, local_event_id: str, *, confirmed: bool, phishing: bool) -> ConsoleOperationResult:
+        if confirmed is not True:
+            return ConsoleOperationResult(ConsoleStatusCode.CONFIRMATION_REQUIRED, None)
+        if not isinstance(local_event_id, str) or _LOCAL_EVENT_ID.fullmatch(local_event_id) is None:
+            return ConsoleOperationResult(ConsoleStatusCode.INVALID_REQUEST, None)
+        try:
+            vector = self._pending_confirmation_store.get(local_event_id, now=self._now_utc())
+        except Exception as error:
+            value = error.args[0] if error.args else ""
+            code = {"pending_context_corrupt": ConsoleStatusCode.PENDING_CONTEXT_CORRUPT, "pending_context_expired": ConsoleStatusCode.PENDING_CONTEXT_EXPIRED}.get(value, ConsoleStatusCode.PENDING_CONTEXT_UNAVAILABLE)
+            return ConsoleOperationResult(code, None)
+        if vector is None:
+            return ConsoleOperationResult(ConsoleStatusCode.PENDING_CONTEXT_NOT_FOUND, None)
+        result = (self._commands.confirm_phishing(vector, confirmed=True) if phishing else self._commands.confirm_benign(vector, confirmed=True))
+        if result.code in {ConsoleStatusCode.EXAMPLE_ADDED, ConsoleStatusCode.EXAMPLE_DUPLICATE, ConsoleStatusCode.EXAMPLE_CONFLICT}:
+            try:
+                self._pending_confirmation_store.delete(local_event_id)
+            except Exception:
+                return ConsoleOperationResult(ConsoleStatusCode.PENDING_CONTEXT_UNAVAILABLE, None)
+        return result
+
+    def confirm_event_benign(self, local_event_id: str, *, confirmed: bool) -> ConsoleOperationResult:
+        return self._confirm_event(local_event_id, confirmed=confirmed, phishing=False)
+
+    def confirm_event_phishing(self, local_event_id: str, *, confirmed: bool) -> ConsoleOperationResult:
+        return self._confirm_event(local_event_id, confirmed=confirmed, phishing=True)
 
     def delete_confirmed_example(self, example_id: str) -> ConsoleOperationResult:
         if not isinstance(example_id, str):

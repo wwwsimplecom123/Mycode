@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime
 
 from .detection_kernel import DetectionKernel
@@ -65,12 +66,14 @@ class LocalDetectionService:
         inference: LocalInference | None = None,
         *,
         example_calibrator: ExampleCalibrator | None = None,
+        feature_sink: Callable[[str, object, datetime], None] | None = None,
     ) -> None:
         adapter = inference if inference is not None else UnavailableModelAdapter()
         self._feature_pipeline = FeaturePipeline()
         self._rule_evaluator = LocalRuleEvaluator()
         self._kernel = DetectionKernel(adapter)
         self._example_calibrator = example_calibrator
+        self._feature_sink = feature_sink
 
     def detect(
         self,
@@ -81,6 +84,11 @@ class LocalDetectionService:
     ) -> DetectionOutcome:
         _validate_observation(observation)
         features = self._feature_pipeline.transform(observation)
+        if self._feature_sink is not None:
+            try:
+                self._feature_sink(local_event_id, features, observed_now)
+            except Exception:
+                pass
         rules = self._rule_evaluator.evaluate(features)
         calibration = None
         if self._example_calibrator is not None:
@@ -103,11 +111,12 @@ class LocalDetectionService:
         )
 
 
-def default_local_detection_service() -> LocalDetectionService:
+def default_local_detection_service(*, feature_sink=None) -> LocalDetectionService:
     from .example_store import ExampleStore
 
     return LocalDetectionService(
-        example_calibrator=ExampleCalibrator(ExampleStore())
+        example_calibrator=ExampleCalibrator(ExampleStore()),
+        feature_sink=feature_sink,
     )
 
 

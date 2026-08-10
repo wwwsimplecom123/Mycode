@@ -26,12 +26,14 @@ class LocalDataCommands:
         diagnostic_exporter: object,
         clock: Callable[[], datetime],
         data_root: Path,
+        pending_confirmation_store: object | None = None,
     ) -> None:
         self._evidence_store = evidence_store
         self._example_store = example_store
         self._diagnostic_exporter = diagnostic_exporter
         self._clock = clock
         self._data_root = Path(data_root).resolve(strict=False)
+        self._pending_confirmation_store = pending_confirmation_store
 
     def _confirm(
         self,
@@ -257,6 +259,11 @@ class LocalDataCommands:
             self._clear_diagnostic_temporary_files()
         except Exception:
             failed = True
+        if self._pending_confirmation_store is not None:
+            try:
+                self._pending_confirmation_store.clear()
+            except Exception:
+                failed = True
         return ConsoleOperationResult(
             (
                 ConsoleStatusCode.LOCAL_DATA_DELETE_PARTIAL_FAILURE

@@ -46,6 +46,16 @@ def make_observation(**changes) -> MailObservation:
 
 
 class LocalDetectionServiceTests(unittest.TestCase):
+    def test_trusted_feature_sink_receives_pipeline_vector_and_failure_isolated(self):
+        received = []
+        observation = make_observation()
+        service = LocalDetectionService(feature_sink=lambda event_id, vector, at: received.append((event_id, vector, at)))
+        outcome = service.detect(observation, local_event_id="event-pending", observed_now=OBSERVED_NOW)
+        self.assertEqual("event-pending", received[0][0])
+        self.assertIsNone(received[0][1].text_input)
+        self.assertEqual(OBSERVED_NOW, received[0][2])
+        failing = LocalDetectionService(feature_sink=lambda *_: (_ for _ in ()).throw(RuntimeError("private")))
+        self.assertEqual(outcome, failing.detect(observation, local_event_id="event-pending", observed_now=OBSERVED_NOW))
     @unittest.skipUnless(sys.platform == "win32", "Windows DPAPI integration")
     def test_explicit_example_calibration_is_applied_through_detection_service(self):
         from shielddome_endpoint.confirmed_examples import (

@@ -310,6 +310,11 @@ def _overwrite_and_unlink(path: Path) -> bool:
         raise KeyProtectionError("protected_key_delete_failed") from None
 
 
+def secure_delete_owned_file(path: Path) -> bool:
+    """Overwrite and remove one already-resolved owned local data file."""
+    return _overwrite_and_unlink(Path(path))
+
+
 class UserDataKeyManager:
     def __init__(
         self,
@@ -403,4 +408,5 @@ __all__ = [
     "KeyProtectionError",
     "UserDataKeyManager",
     "default_user_data_directory",
+    "secure_delete_owned_file",
 ]

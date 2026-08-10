@@ -16,13 +16,17 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QButtonGroup,
+    QComboBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QInputDialog,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -40,7 +44,9 @@ from .desktop_presenter import (
     DesktopConsoleState,
     DesktopLoadState,
     PersonalConsolePresenter,
+    DELETE_ALL_CONFIRMATION_TEXT,
 )
+from .startup_manager import StartupStatusCode, WindowsStartupManager
 
 
 GRAPHITE = "#202A2F"
@@ -196,12 +202,27 @@ class DistributionChart(QWidget):
             painter.setFont(QFont("Segoe UI", 9))
 
 
+class QtDialogAdapter:
+    def choose_diagnostic_path(self, parent) -> str | None:
+        path, _ = QFileDialog.getSaveFileName(parent, "导出诊断包", "", "ZIP 文件 (*.zip)")
+        return path or None
+
+    def confirm(self, parent, title: str, text: str) -> bool:
+        return QMessageBox.question(parent, title, text, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) is QMessageBox.StandardButton.Yes
+
+    def confirmation_text(self, parent, title: str, text: str) -> str | None:
+        value, accepted = QInputDialog.getText(parent, title, text)
+        return value if accepted else None
+
+
 class ShieldDomeMainWindow(QMainWindow):
     statusChanged = Signal(str, str)
 
-    def __init__(self, presenter: PersonalConsolePresenter) -> None:
+    def __init__(self, presenter: PersonalConsolePresenter, *, startup_manager: object, dialogs: object) -> None:
         super().__init__()
         self._presenter = presenter
+        self._startup_manager = startup_manager
+        self._dialogs = dialogs
         self._lifecycle: DesktopLifecycle | None = None
         self._rendering = False
         self.setObjectName("shieldDomeMainWindow")
@@ -227,6 +248,8 @@ class ShieldDomeMainWindow(QMainWindow):
         root_layout.addWidget(self._build_navigation())
         self._pages.addWidget(self._build_overview_page())
         self._pages.addWidget(self._build_events_page())
+        self._pages.addWidget(self._build_examples_page())
+        self._pages.addWidget(self._build_local_data_page())
         root_layout.addWidget(self._pages, 1)
         self.setCentralWidget(root)
 
@@ -255,7 +278,11 @@ class ShieldDomeMainWindow(QMainWindow):
         self._overview_nav.setObjectName("overviewNav")
         self._events_nav = QPushButton("最近事件")
         self._events_nav.setObjectName("eventsNav")
-        for index, button in enumerate((self._overview_nav, self._events_nav)):
+        self._examples_nav = QPushButton("已确认样本")
+        self._examples_nav.setObjectName("examplesNav")
+        self._local_data_nav = QPushButton("本地数据")
+        self._local_data_nav.setObjectName("localDataNav")
+        for index, button in enumerate((self._overview_nav, self._events_nav, self._examples_nav, self._local_data_nav)):
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             self._nav_group.addButton(button, index)
@@ -353,6 +380,153 @@ class ShieldDomeMainWindow(QMainWindow):
         self._overview_table = self._create_event_table("overviewEventsTable", 4)
         layout.addWidget(self._overview_table, 2)
         return page
+
+    def _build_examples_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("examplesPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 18, 24, 16)
+        layout.setSpacing(10)
+        header, _ = self._page_header("已确认样本", "只显示脱敏标签、来源、确认时间与冲突状态")
+        layout.addWidget(header)
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("标签"))
+        self._example_filter = QComboBox()
+        self._example_filter.setObjectName("exampleFilter")
+        self._example_filter.addItem("全部", None)
+        self._example_filter.addItem("正常", "benign")
+        self._example_filter.addItem("钓鱼", "phishing")
+        self._example_filter.currentIndexChanged.connect(self._refresh_examples)
+        toolbar.addWidget(self._example_filter)
+        toolbar.addStretch(1)
+        self._clear_examples_button = QPushButton("清空全部样本")
+        self._clear_examples_button.setObjectName("dangerButton")
+        self._clear_examples_button.clicked.connect(self._clear_examples)
+        toolbar.addWidget(self._clear_examples_button)
+        layout.addLayout(toolbar)
+        self._examples_table = QTableWidget(0, 5)
+        self._examples_table.setObjectName("examplesTable")
+        self._examples_table.setHorizontalHeaderLabels(("确认时间", "标签", "来源", "冲突", "操作"))
+        self._examples_table.verticalHeader().setVisible(False)
+        self._examples_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._examples_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self._examples_table, 1)
+        paging = QHBoxLayout()
+        self._examples_previous = QPushButton("上一页")
+        self._examples_previous.clicked.connect(lambda: self._render_examples(self._presenter.previous_examples()))
+        self._examples_page_label = QLabel("第 1 / 1 页")
+        self._examples_next = QPushButton("下一页")
+        self._examples_next.clicked.connect(lambda: self._render_examples(self._presenter.next_examples()))
+        paging.addWidget(self._examples_previous); paging.addStretch(1); paging.addWidget(self._examples_page_label); paging.addStretch(1); paging.addWidget(self._examples_next)
+        layout.addLayout(paging)
+        self._examples_status = QLabel("本地样本仅用于有限校准")
+        self._examples_status.setObjectName("operationStatus")
+        layout.addWidget(self._examples_status)
+        return page
+
+    def _build_local_data_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("localDataPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 18, 24, 16)
+        layout.setSpacing(0)
+        header, _ = self._page_header("本地数据", "当前 Windows 用户 · 所有操作均在本机完成")
+        layout.addWidget(header)
+        self._startup_status = QLabel()
+        self._startup_status.setObjectName("startupStatus")
+        self._startup_button = QPushButton("启用开机启动")
+        self._startup_button.setObjectName("startupToggle")
+        self._startup_button.clicked.connect(self._toggle_startup)
+        layout.addWidget(self._settings_row("开机启动", "登录当前用户后启动本地防护", self._startup_status, self._startup_button))
+        self._diagnostic_status = QLabel("由你选择保存位置，不会自动打开或上传")
+        self._diagnostic_button = QPushButton("导出诊断包")
+        self._diagnostic_button.setObjectName("diagnosticExportButton")
+        self._diagnostic_button.clicked.connect(self._export_diagnostics)
+        layout.addWidget(self._settings_row("诊断包", "只包含脱敏聚合与兼容性信息", self._diagnostic_status, self._diagnostic_button))
+        self._delete_all_status = QLabel("删除证据、样本、密钥与诊断临时文件")
+        self._delete_all_button = QPushButton("删除全部本地数据")
+        self._delete_all_button.setObjectName("dangerButton")
+        self._delete_all_button.clicked.connect(self._delete_all_data)
+        danger_row = self._settings_row("危险操作", "不影响应用程序文件和浏览器插件", self._delete_all_status, self._delete_all_button)
+        danger_row.setObjectName("dangerZone")
+        layout.addWidget(danger_row)
+        layout.addStretch(1)
+        self._render_startup_status()
+        return page
+
+    def _settings_row(self, title: str, detail: str, status: QLabel, action: QPushButton) -> QFrame:
+        row = QFrame()
+        row.setObjectName("settingsRow")
+        row.setMinimumHeight(116)
+        grid = QGridLayout(row)
+        heading = QLabel(title); heading.setObjectName("sectionTitle")
+        caption = QLabel(detail); caption.setObjectName("sectionCaption")
+        status.setWordWrap(True)
+        grid.addWidget(heading, 0, 0); grid.addWidget(caption, 1, 0); grid.addWidget(status, 2, 0)
+        grid.addWidget(action, 0, 1, 3, 1, Qt.AlignmentFlag.AlignVCenter)
+        grid.setColumnStretch(0, 1)
+        return row
+
+    def _refresh_examples(self) -> None:
+        self._render_examples(self._presenter.refresh_examples(self._example_filter.currentData()))
+
+    def _render_examples(self, state: DesktopConsoleState) -> None:
+        rows = state.examples.rows
+        self._examples_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            for column, text in enumerate((row.confirmed_at_text, row.label_text, row.source_text, row.conflict_text)):
+                self._examples_table.setItem(index, column, QTableWidgetItem(text))
+            button = QPushButton("删除")
+            button.setProperty("exampleId", row.example_id)
+            button.clicked.connect(lambda checked=False, eid=row.example_id: self._delete_example(eid))
+            self._examples_table.setCellWidget(index, 4, button)
+        self._examples_page_label.setText(f"第 {state.examples.page_number} / {state.examples.total_pages} 页")
+        self._examples_previous.setEnabled(state.examples.can_previous)
+        self._examples_next.setEnabled(state.examples.can_next)
+        self._examples_status.setText(state.operation_title or state.examples.empty_message or "样本库已加载")
+
+    def _delete_example(self, example_id: str) -> None:
+        confirmed = self._dialogs.confirm(self, "删除样本", "删除这条已确认样本？此操作不会删除邮件。")
+        self._render_examples(self._presenter.delete_example(example_id, confirmed=confirmed))
+
+    def _clear_examples(self) -> None:
+        confirmed = self._dialogs.confirm(self, "清空全部样本", "删除 Confirmed Example Library 中的全部本地样本？")
+        self._render_examples(self._presenter.clear_examples(confirmed=confirmed))
+
+    def _render_startup_status(self) -> None:
+        status = self._startup_manager.status()
+        text = {StartupStatusCode.ENABLED: "已启用", StartupStatusCode.DISABLED: "未启用", StartupStatusCode.UNAVAILABLE: "安装版提供开机启动", StartupStatusCode.FOREIGN_ENTRY: "同名启动项不属于 ShieldDome，未更改", StartupStatusCode.FAILED: "无法读取开机启动状态"}[status.code]
+        self._startup_status.setText(text)
+        self._startup_button.setText("停用开机启动" if status.enabled else "启用开机启动")
+        self._startup_button.setEnabled(status.code in {StartupStatusCode.ENABLED, StartupStatusCode.DISABLED})
+
+    def _toggle_startup(self) -> None:
+        current = self._startup_manager.status()
+        self._startup_manager.uninstall() if current.enabled else self._startup_manager.install()
+        self._render_startup_status()
+
+    def _export_diagnostics(self) -> None:
+        path = self._dialogs.choose_diagnostic_path(self)
+        if not path:
+            self._diagnostic_status.setText("已取消，未创建诊断包")
+            return
+        if not self._dialogs.confirm(self, "导出诊断包", "将脱敏诊断包保存到你选择的位置？"):
+            self._diagnostic_status.setText("已取消，未创建诊断包")
+            return
+        state = self._presenter.export_diagnostics(path, confirmed=True)
+        if state.operation_title == "目标文件已存在" and self._dialogs.confirm(self, "覆盖现有文件", "目标文件已存在。确认覆盖？"):
+            state = self._presenter.export_diagnostics(path, confirmed=True, overwrite=True)
+        self._diagnostic_status.setText(state.operation_title or "诊断导出状态不可用")
+
+    def _delete_all_data(self) -> None:
+        if not self._dialogs.confirm(self, "删除全部本地数据", "将删除本地检测证据、已确认样本、加密密钥和诊断临时文件。应用程序和浏览器插件不会删除。继续？"):
+            self._delete_all_status.setText("已取消，本地数据未更改")
+            return
+        value = self._dialogs.confirmation_text(self, "再次确认", f"请输入：{DELETE_ALL_CONFIRMATION_TEXT}")
+        state = self._presenter.delete_all_local_data(first_confirmed=True, confirmation_text=value or "")
+        self._delete_all_status.setText(state.operation_title or "本地数据操作已完成")
+        self.render_state(state)
+        self._render_examples(state)
 
     def _build_metric_band(self) -> QFrame:
         band = QFrame()
@@ -505,6 +679,10 @@ class ShieldDomeMainWindow(QMainWindow):
             QPushButton#refreshButton:hover, QPushButton#previousPageButton:hover, QPushButton#nextPageButton:hover {{ border-color: {SIGNAL_TEAL}; color: {SIGNAL_TEAL}; }}
             QPushButton:focus {{ outline: none; border: 2px solid {SIGNAL_TEAL}; }}
             QPushButton:disabled {{ color: #9FA7A4; background: #ECEFEC; border-color: #D9DDDA; }}
+            QPushButton#dangerButton {{ color: white; background: {CRITICAL}; border: 1px solid #842E2A; padding: 7px 14px; border-radius: 3px; }}
+            #settingsRow {{ border-top: 1px solid {RULE}; background: transparent; }}
+            #dangerZone {{ border-top: 2px solid {CRITICAL}; }}
+            #operationStatus {{ color: {MUTED}; }}
             #metricBand {{ border-top: 1px solid {RULE}; border-bottom: 1px solid {RULE}; background: #F8F9F7; }}
             #metricCell {{ border-right: 1px solid {RULE}; }}
             QLabel[metricValue='true'] {{ font-family: 'Cascadia Mono'; font-size: 24px; font-weight: 600; color: {INK}; }}
@@ -537,6 +715,7 @@ class ShieldDomeMainWindow(QMainWindow):
             self.render_state(self._presenter.refresh())
         finally:
             self._set_controls_enabled(True)
+            self._render_startup_status()
             self._rendering = False
 
     def _set_controls_enabled(self, enabled: bool) -> None:
@@ -728,6 +907,8 @@ def create_desktop_application(
     *,
     show: bool = True,
     enable_tray: bool = True,
+    startup_manager: object | None = None,
+    dialogs: object | None = None,
 ) -> DesktopApplicationBundle:
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("ShieldDome Endpoint Agent")
@@ -738,7 +919,11 @@ def create_desktop_application(
 
         service = PersonalConsoleService()
     presenter = PersonalConsolePresenter(service)
-    window = ShieldDomeMainWindow(presenter)
+    window = ShieldDomeMainWindow(
+        presenter,
+        startup_manager=startup_manager or WindowsStartupManager(),
+        dialogs=dialogs or QtDialogAdapter(),
+    )
     tray = None
     tray_status_action = None
     if enable_tray:

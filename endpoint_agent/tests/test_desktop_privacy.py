@@ -37,12 +37,8 @@ class DesktopPrivacyTests(unittest.TestCase):
             "cryptography",
         }
         forbidden_mutations = {
-            "clear_confirmed_examples",
             "confirm_benign",
             "confirm_phishing",
-            "delete_all_local_data",
-            "delete_confirmed_example",
-            "export_diagnostics",
         }
 
         for filename in DESKTOP_SOURCES:

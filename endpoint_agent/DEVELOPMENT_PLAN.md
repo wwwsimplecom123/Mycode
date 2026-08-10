@@ -589,13 +589,21 @@ Status: complete
 - 已使用 Qt Widgets 与 `QPainter` 自绘轻量图表，不引入 Qt Charts、浏览器页面、Electron、本地 HTTP、网络客户端或监听端口。
 - 已在真实 PySide6 Windows 环境启动并检查 1366x768 与最低 1024x720 截图；表格、图表、按钮和状态区域尺寸稳定，无重叠或截断。
 
-##### Phase 7B.2：启动集成与个人数据写交互
+##### Phase 7B.2A：当前用户启动集成与安全本地数据管理界面
+
+Status: complete
+
+- 已实现 HKCU 当前用户启动管理，只接受绝对路径、冻结且名为 `ShieldDomeEndpoint.exe` 的打包入口；开发环境明确显示安装版提供开机启动。
+- 安装、查询、重复安装和卸载幂等；同名非自有值不会被覆盖或删除；不使用 HKLM、计划任务、管理员权限、shell 或 PowerShell。
+- 已增加脱敏样本分页/标签筛选/冲突状态/单条删除/确认清空、用户选路且覆盖二次确认的诊断导出，以及固定文本双重确认的全部本地数据删除。
+- 所有写操作只通过 `PersonalConsoleService`；不添加网络、监听、上传、预览、自动打开或敏感路径记忆。
+
+##### Phase 7B.2B：误报/漏报确认安全设计
 
 Status: pending
 
-- 当前用户登录启动与安装/卸载生命周期集成。
-- Confirmed Example Library、误报/漏报、诊断导出和本地数据删除的桌面交互。
-- 本子阶段不得被 Phase 7B.1 的只读界面替代或提前标记完成。
+- `confirm_benign(...)` 与 `confirm_phishing(...)` 需要调用方提供 `FeatureVector`，但 Endpoint Evidence Record 和桌面 ViewModel 不保存或返回该值。
+- 在建立独立、可验证的安全来源前，不从邮件原文重建、不在证据记录中新增、不由 UI 伪造，也不提供无效确认按钮。
 
 #### Phase 7C：安全 `.eml` 拖入检测
 
@@ -604,7 +612,7 @@ Status: pending
 - 只在独立安全设计、资源边界和隐私测试完成后实现 `.eml` 拖入检测。
 - 不复用浏览器作为控制台，不扩展为跨用户、管理员或中心后台功能。
 
-Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A 与 Phase 7B.1 已完成，Phase 7B.2 与 Phase 7C 仍为 `pending`，因此 Phase 7 总状态保持 `in_progress`。
+Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A、Phase 7B.1 与 Phase 7B.2A 已完成，Phase 7B.2B 与 Phase 7C 仍为 `pending`，因此 Phase 7B 与 Phase 7 总状态保持 `in_progress`。
 
 ### Phase 8：Endpoint Release
 
@@ -686,4 +694,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已完成：Phase 6A 提供当前用户 DPAPI、逐记录 AES-256-GCM、每用户 SQLite、15 天清理和全部删除；Phase 6B 提供显式确认样本库与有限校准；Phase 6C 提供显式确认、用户选路、默认不覆盖的一次性脱敏诊断包。Phase 7 保持 `in_progress`：Phase 7A 服务层与 Phase 7B.1 Windows 托盘/只读个人安全控制台已经完成；Phase 7B.2 启动集成和个人数据写交互、Phase 7C 安全 `.eml` 接入仍为 `pending`，不得提前实施。
+Phase 6 已完成。Phase 7 保持 `in_progress`：Phase 7A、Phase 7B.1 与 Phase 7B.2A 已完成；受 FeatureVector 安全来源阻塞的 Phase 7B.2B 和 Phase 7C 仍为 `pending`。

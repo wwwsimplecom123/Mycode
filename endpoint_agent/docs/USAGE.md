@@ -478,7 +478,17 @@ $env:PYTHONPATH = (Resolve-Path endpoint_agent\src)
 
 主窗口只显示 Phase 7A 真实 ViewModel：今日检测数量、15 天补零趋势、风险/来源分布、模型拒判/故障/纯规则降级数量、最近事件分页和脱敏详情。托盘显示本地 Agent 状态并提供打开、隐藏、退出；普通关闭窗口只隐藏到托盘。空库、损坏存储和降级均显示固定安全状态，不呈现异常文本。
 
-UI/Presenter 不直接导入 SQLite、EvidenceStore、ExampleStore、DPAPI、AES-GCM、密钥或密文，不提供样本确认、删除、清空、诊断导出、开机启动或 `.eml` 入口，也不创建网络连接或监听端口。核心包没有 PySide6 时仍可导入；只有桌面入口返回固定依赖错误。
+UI/Presenter 不直接导入 SQLite、EvidenceStore、ExampleStore、DPAPI、AES-GCM、密钥或密文；7B.2A 写操作只通过 `PersonalConsoleService`。界面不提供误报/漏报确认或 `.eml` 入口，也不创建网络连接或监听端口。核心包没有 PySide6 时仍可导入。
+
+### 7.5 当前用户启动与本地数据管理
+
+Phase 7B.2A 增加“已确认样本”和“本地数据”页面。样本表只显示确认时间、正常/钓鱼标签、固定来源和冲突状态；删除单条与清空全部都要求明确确认，成功后重新通过 `PersonalConsoleService` 读取。界面不显示 FeatureVector、fingerprint、正文、地址、URL 或附件信息。
+
+开机启动仅使用 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不需要管理员权限，也不使用 HKLM、计划任务、shell 或 PowerShell。只有冻结打包且绝对路径指向 `ShieldDomeEndpoint.exe` 的安装版可以注册；源码开发和普通 `python.exe` 显示“安装版提供开机启动”。同名非自有值不会被覆盖或删除。
+
+诊断导出必须由用户点击、选择输出路径并确认；默认不覆盖，目标存在时要求独立二次确认。界面不读取、预览、打开、上传或记忆诊断包及路径。删除全部本地数据先说明证据、样本、密钥和诊断临时文件类别，再要求精确输入 `删除全部本地数据`；应用程序文件与浏览器插件不受影响。
+
+Phase 7B.2B 仍为 `pending`：确认正常/钓鱼需要 `FeatureVector`，但 Endpoint Evidence Record 和桌面 ViewModel 没有安全提供该数据。本阶段没有从原文重建、持久化或伪造 FeatureVector，也没有加入反馈确认按钮。
 
 真实 Windows Qt 截图保存在被忽略的验证目录：
 
@@ -756,10 +766,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- Phase 7B.2 的开机启动、样本确认/删除/清空、诊断导出和全部数据删除桌面交互；
+- Phase 7B.2B 的误报/漏报确认（受安全 FeatureVector 来源阻塞）；
 - Phase 7C 的安全 `.eml` 拖入检测或其他邮件客户端 adapter。
 
-Phase 3 继续受真实、许可完整、人工审核且去泄漏的 Approved Training Corpus 阻塞并保持 `pending`。Phase 5B 已进入 `in_progress`：自动化构建/身份/注册准备已完成，但仍需批准的离线 PyInstaller 产生真实 Host，并分别完成 Chrome/Edge chinaccs 验收；这不代表绕过模型合规要求。Phase 6A、Phase 6B、Phase 6C 与 Phase 6 均已完成。Phase 7A 与 Phase 7B.1 已完成，Phase 7B 为 `in_progress`，Phase 7B.2 与 Phase 7C 保持 `pending`，Phase 7 总状态保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受 Approved Training Corpus 阻塞并保持 `pending`。Phase 6 已完成。Phase 7A、Phase 7B.1 与 Phase 7B.2A 已完成；Phase 7B.2B 与 Phase 7C 保持 `pending`，因此 Phase 7B 与 Phase 7 总状态保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 14. 修改后的最低验证
 

@@ -10,6 +10,7 @@ from .console_models import (
     ConfirmedExampleListItemViewModel,
     ConfirmedExamplePageViewModel,
     ConsoleHealthStatus,
+    ConsoleExampleLabel,
     ConsoleOperationResult,
     ConsoleStatusCode,
     DailyDetectionCount,
@@ -395,8 +396,10 @@ class PersonalConsoleService:
         *,
         offset: int = 0,
         limit: int = CONSOLE_EXAMPLE_PAGE_MAX_ITEMS,
-        label: ExampleLabel | None = None,
+        label: ExampleLabel | ConsoleExampleLabel | None = None,
     ) -> ConsoleOperationResult:
+        if isinstance(label, ConsoleExampleLabel):
+            label = ExampleLabel(label.value)
         if (
             isinstance(offset, bool)
             or not isinstance(offset, int)

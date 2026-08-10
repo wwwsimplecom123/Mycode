@@ -79,6 +79,8 @@ from .console_service import (
     PersonalConsoleService,
 )
 from .desktop_presenter import (
+    DELETE_ALL_CONFIRMATION_TEXT,
+    DESKTOP_EXAMPLE_PAGE_SIZE,
     DESKTOP_EVENT_PAGE_SIZE,
     AgentStatusDisplay,
     ChartValue,
@@ -87,7 +89,16 @@ from .desktop_presenter import (
     EventDetailDisplay,
     EventPageDisplay,
     EventRowDisplay,
+    ExamplePageDisplay,
+    ExampleRowDisplay,
     PersonalConsolePresenter,
+)
+from .startup_manager import (
+    STARTUP_RUN_KEY,
+    STARTUP_VALUE_NAME,
+    StartupStatus,
+    StartupStatusCode,
+    WindowsStartupManager,
 )
 from .example_calibration import (
     EXAMPLE_APPROXIMATE_MIN_MATCHES,
@@ -210,6 +221,8 @@ __all__ = [
     "StoreHealthViewModel",
     "PersonalConsoleService",
     "DESKTOP_EVENT_PAGE_SIZE",
+    "DESKTOP_EXAMPLE_PAGE_SIZE",
+    "DELETE_ALL_CONFIRMATION_TEXT",
     "AgentStatusDisplay",
     "ChartValue",
     "DesktopConsoleState",
@@ -217,7 +230,14 @@ __all__ = [
     "EventDetailDisplay",
     "EventPageDisplay",
     "EventRowDisplay",
+    "ExamplePageDisplay",
+    "ExampleRowDisplay",
     "PersonalConsolePresenter",
+    "STARTUP_RUN_KEY",
+    "STARTUP_VALUE_NAME",
+    "StartupStatus",
+    "StartupStatusCode",
+    "WindowsStartupManager",
     "ExampleLabel",
     "ExampleSource",
     "UserConfirmationAction",

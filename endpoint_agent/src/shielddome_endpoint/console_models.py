@@ -62,6 +62,11 @@ class ConsoleStatusCode(StrEnum):
     COMMAND_FAILED = "command_failed"
 
 
+class ConsoleExampleLabel(StrEnum):
+    BENIGN = "benign"
+    PHISHING = "phishing"
+
+
 def _valid_count(value: object) -> bool:
     return not isinstance(value, bool) and isinstance(value, int) and value >= 0
 
@@ -442,6 +447,7 @@ __all__ = [
     "CONSOLE_VIEW_MODEL_SCHEMA_VERSION",
     "AgentStatusSummary",
     "ConsoleHealthStatus",
+    "ConsoleExampleLabel",
     "ConsoleOperationResult",
     "ConsoleStatusCode",
     "ConfirmedExampleListItemViewModel",

@@ -3,8 +3,10 @@ from enum import StrEnum
 
 from .console_models import (
     ConsoleHealthStatus,
+    ConsoleExampleLabel,
     ConsoleOperationResult,
     ConsoleStatusCode,
+    ConfirmedExamplePageViewModel,
     DashboardViewModel,
     EventDetailViewModel,
     EventPageViewModel,
@@ -13,6 +15,8 @@ from .console_models import (
 
 
 DESKTOP_EVENT_PAGE_SIZE = 10
+DESKTOP_EXAMPLE_PAGE_SIZE = 10
+DELETE_ALL_CONFIRMATION_TEXT = "删除全部本地数据"
 
 
 class DesktopLoadState(StrEnum):
@@ -78,6 +82,30 @@ class EventPageDisplay:
 
 
 @dataclass(frozen=True, slots=True)
+class ExampleRowDisplay:
+    example_id: str
+    confirmed_at_text: str
+    label_key: str
+    label_text: str
+    source_text: str
+    conflict: bool
+    conflict_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExamplePageDisplay:
+    offset: int
+    page_number: int
+    total_pages: int
+    total_matches: int
+    label_filter: str | None
+    can_previous: bool
+    can_next: bool
+    rows: tuple[ExampleRowDisplay, ...]
+    empty_message: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class DesktopConsoleState:
     load_state: DesktopLoadState
     generated_at_text: str
@@ -94,6 +122,9 @@ class DesktopConsoleState:
     detail: EventDetailDisplay | None
     notice_title: str | None
     notice_body: str | None
+    examples: ExamplePageDisplay
+    operation_title: str | None
+    operation_body: str | None
 
 
 _RISK_LABELS = {
@@ -169,6 +200,10 @@ def _empty_event_page() -> EventPageDisplay:
     )
 
 
+def _empty_example_page() -> ExamplePageDisplay:
+    return ExamplePageDisplay(0, 1, 1, 0, None, False, False, (), "暂无已确认样本")
+
+
 def _initial_state(load_state: DesktopLoadState) -> DesktopConsoleState:
     return DesktopConsoleState(
         load_state=load_state,
@@ -191,6 +226,9 @@ def _initial_state(load_state: DesktopLoadState) -> DesktopConsoleState:
         detail=None,
         notice_title=None,
         notice_body=None,
+        examples=_empty_example_page(),
+        operation_title=None,
+        operation_body=None,
     )
 
 
@@ -198,6 +236,8 @@ class PersonalConsolePresenter:
     def __init__(self, console_service: object) -> None:
         self._service = console_service
         self._event_offset = 0
+        self._example_offset = 0
+        self._example_label: ConsoleExampleLabel | None = None
         self._state = _initial_state(DesktopLoadState.LOADING)
 
     @property
@@ -258,6 +298,124 @@ class PersonalConsolePresenter:
                 notice_body="该事件可能已到期或本地记录暂时不可读。",
             )
         return self._state
+
+    def refresh_examples(self, label: str | None = None) -> DesktopConsoleState:
+        mapping = {None: None, "benign": ConsoleExampleLabel.BENIGN, "phishing": ConsoleExampleLabel.PHISHING}
+        if label not in mapping:
+            return replace(self._state, operation_title="无法筛选样本", operation_body="请选择全部、正常或钓鱼。")
+        self._example_label = mapping[label]
+        self._example_offset = 0
+        return self._load_examples()
+
+    def next_examples(self) -> DesktopConsoleState:
+        if self._state.examples.can_next:
+            self._example_offset += DESKTOP_EXAMPLE_PAGE_SIZE
+            return self._load_examples()
+        return self._state
+
+    def previous_examples(self) -> DesktopConsoleState:
+        if self._state.examples.can_previous:
+            self._example_offset = max(0, self._example_offset - DESKTOP_EXAMPLE_PAGE_SIZE)
+            return self._load_examples()
+        return self._state
+
+    def _load_examples(self) -> DesktopConsoleState:
+        try:
+            result = self._service.list_confirmed_examples(
+                offset=self._example_offset,
+                limit=DESKTOP_EXAMPLE_PAGE_SIZE,
+                label=self._example_label,
+            )
+            if result.code is not ConsoleStatusCode.SUCCESS or not isinstance(result.payload, ConfirmedExamplePageViewModel):
+                raise RuntimeError("example_page_unavailable")
+            page = result.payload
+            total_pages = max(1, (page.total_matches + DESKTOP_EXAMPLE_PAGE_SIZE - 1) // DESKTOP_EXAMPLE_PAGE_SIZE)
+            display = ExamplePageDisplay(
+                page.offset,
+                page.offset // DESKTOP_EXAMPLE_PAGE_SIZE + 1,
+                total_pages,
+                page.total_matches,
+                page.label_filter,
+                page.offset > 0,
+                page.has_more,
+                tuple(
+                    ExampleRowDisplay(
+                        item.example_id,
+                        item.confirmed_at_utc.strftime("%Y-%m-%d %H:%M UTC"),
+                        item.label,
+                        "正常" if item.label == "benign" else "钓鱼",
+                        {"browser_native": "浏览器插件", "manual_local": "本地检测"}.get(item.source, item.source),
+                        item.conflict,
+                        "有冲突" if item.conflict else "无冲突",
+                    )
+                    for item in page.items
+                ),
+                "暂无已确认样本" if not page.items else None,
+            )
+            self._state = replace(self._state, examples=display, operation_title=None, operation_body=None)
+        except Exception:
+            self._state = replace(self._state, operation_title="无法读取样本库", operation_body="本地样本暂时不可用，请稍后重试。")
+        return self._state
+
+    def delete_example(self, example_id: str, *, confirmed: bool) -> DesktopConsoleState:
+        if confirmed is not True:
+            return replace(self._state, operation_title="已取消删除", operation_body="样本未更改。")
+        try:
+            result = self._service.delete_confirmed_example(example_id)
+            if result.code is not ConsoleStatusCode.SUCCESS:
+                raise RuntimeError("delete_failed")
+            self._load_examples()
+            self._state = replace(self._state, operation_title="样本已删除", operation_body="样本库已刷新。")
+            return self._state
+        except Exception:
+            self._state = replace(self._state, operation_title="无法删除样本", operation_body="样本未更改，请稍后重试。")
+            return self._state
+
+    def clear_examples(self, *, confirmed: bool) -> DesktopConsoleState:
+        if confirmed is not True:
+            return replace(self._state, operation_title="已取消清空", operation_body="样本库未更改。")
+        try:
+            result = self._service.clear_confirmed_examples(confirmed=True)
+            if result.code is not ConsoleStatusCode.SUCCESS:
+                raise RuntimeError("clear_failed")
+            self._example_offset = 0
+            self._load_examples()
+            self._state = replace(self._state, operation_title="样本库已清空", operation_body="列表已刷新。")
+            return self._state
+        except Exception:
+            self._state = replace(self._state, operation_title="无法清空样本库", operation_body="样本未更改，请稍后重试。")
+            return self._state
+
+    def export_diagnostics(self, output_path, *, confirmed: bool, overwrite: bool = False) -> DesktopConsoleState:
+        if not output_path or confirmed is not True:
+            self._state = replace(self._state, operation_title="已取消导出", operation_body="未创建诊断包。")
+            return self._state
+        try:
+            result = self._service.export_diagnostics(output_path, confirmed=True, overwrite=overwrite)
+            if result.code is ConsoleStatusCode.DIAGNOSTIC_OUTPUT_EXISTS:
+                return replace(self._state, operation_title="目标文件已存在", operation_body="如需覆盖，请再次确认。")
+            if result.code is not ConsoleStatusCode.DIAGNOSTIC_EXPORTED:
+                raise RuntimeError("export_failed")
+            self._state = replace(self._state, operation_title="诊断包已导出", operation_body="文件已保存到所选位置。")
+        except Exception:
+            self._state = replace(self._state, operation_title="无法导出诊断包", operation_body="未创建诊断包，请稍后重试。")
+        return self._state
+
+    def delete_all_local_data(self, *, first_confirmed: bool, confirmation_text: str) -> DesktopConsoleState:
+        if first_confirmed is not True or confirmation_text != DELETE_ALL_CONFIRMATION_TEXT:
+            self._state = replace(self._state, operation_title="已取消删除", operation_body="本地数据未更改。")
+            return self._state
+        try:
+            result = self._service.delete_all_local_data(confirmed=True)
+            if result.code is not ConsoleStatusCode.SUCCESS:
+                raise RuntimeError("delete_all_failed")
+            self._state = self.refresh()
+            self.refresh_examples(self._example_label.value if self._example_label else None)
+            self._state = replace(self._state, operation_title="全部本地数据已删除", operation_body="看板和样本库已刷新。")
+            return self._state
+        except Exception:
+            self._state = replace(self._state, operation_title="无法删除全部本地数据", operation_body="部分或全部数据未删除，请稍后重试。")
+            return self._state
 
     def _load_event_page(self, offset: int) -> DesktopConsoleState:
         try:
@@ -358,6 +516,9 @@ class PersonalConsolePresenter:
             detail=None,
             notice_title=notice_title,
             notice_body=notice_body,
+            examples=self._state.examples,
+            operation_title=self._state.operation_title,
+            operation_body=self._state.operation_body,
         )
 
     @staticmethod
@@ -426,11 +587,16 @@ class PersonalConsolePresenter:
             detail=state.detail,
             notice_title="无法读取个人安全看板",
             notice_body="请确认本地 Agent 正在运行后重试；界面不会显示内部错误详情。",
+            examples=state.examples,
+            operation_title=state.operation_title,
+            operation_body=state.operation_body,
         )
 
 
 __all__ = [
     "DESKTOP_EVENT_PAGE_SIZE",
+    "DESKTOP_EXAMPLE_PAGE_SIZE",
+    "DELETE_ALL_CONFIRMATION_TEXT",
     "AgentStatusDisplay",
     "ChartValue",
     "DesktopConsoleState",
@@ -438,5 +604,7 @@ __all__ = [
     "EventDetailDisplay",
     "EventPageDisplay",
     "EventRowDisplay",
+    "ExamplePageDisplay",
+    "ExampleRowDisplay",
     "PersonalConsolePresenter",
 ]

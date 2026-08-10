@@ -2,7 +2,7 @@
 
 ## 1. 当前可用范围
 
-当前仓库已完成 Phase 7A、Phase 7B.1、Phase 7B.2A、Phase 7B.2B 与 Phase 7B；Phase 7 总状态保持 `in_progress`，Phase 7C 安全 `.eml` 接入保持 `pending`。Phase 3、Phase 4B 与 Phase 5B 的既有状态不因本阶段改变。当前提供：
+当前仓库已完成 Phase 7B 与 Phase 7C.1；Phase 7C.2 保持 `pending`，因此 Phase 7C 与 Phase 7 均保持 `in_progress`。Phase 3、Phase 4B 与 Phase 5B 的既有状态不因本阶段改变。当前提供：
 
 - 可离线构建、导入的独立 Python 包 `shielddome_endpoint`；
 - Phase 0 的不可变领域类型和版本字段；
@@ -23,6 +23,8 @@
 - 精确四字段插件投影、内存私密证据投影和 DetectionOutcome 隐私扫描。
 - Feature Schema 2.0 完整边界验证、集中式本地规则策略和稳定不可变 `RuleAssessment` tuple；
 - 从 `MailObservation` 到 `DetectionOutcome` 的固定内存链路 `LocalDetectionService.detect(...)`。
+- `SafeEmlReader.read_explicit(...)` 与 `LocalMailIntakeService.detect_file(...)`：只处理用户明确确认的单个普通本地 `.eml`，使用 25 MiB 文件上限、64 KiB Header 总上限、8 KiB 单行 Header、256 Part、16 层、64 附件、100 收件人、32 KiB 正文和 256 URL 上限。
+- HTML 仅由标准库做有界纯文本化；附件不解码、不解压、不打开、不预览、不写盘，嵌套邮件附件不递归；认证结果仅作为 Header 声明观察值。
 - 4 字节 little-endian + UTF-8 JSON Native Messaging 协议、严格 payload 白名单、集中资源上限和稳定错误码；
 - `run_native_host(input_stream, output_stream, handler)` BytesIO seam、固定开发 extension origin 与四字段最小结果；
 - `endpoint_agent/extension/` 下只匹配 `https://webmail.chinaccs.cn/*`、不含网络客户端、服务器地址或插件 Token 的独立 MV3 插件。
@@ -766,9 +768,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File endpoint_agent\native_host\u
 - Phase 3 正式文本编码模型、模型选择、正式训练、量化、发布指标或最低硬件验证；
 - Phase 4B 生产 ONNX Runtime adapter、正式模型加载、真实执行超时或资源控制；
 - 当前环境实际构建的 Host 可执行文件、默认 Chrome/Edge Native Host 注册或真实浏览器联调；
-- Phase 7C 的安全 `.eml` 拖入检测或其他邮件客户端 adapter。
+- Phase 7C.2 的安全 `.eml` 拖入 UI、文件选择器或其他邮件客户端 adapter。
 
-Phase 3 继续受 Approved Training Corpus 阻塞并保持 `pending`。Phase 6 已完成。Phase 7A、Phase 7B.1、Phase 7B.2A、Phase 7B.2B 与 Phase 7B 已完成；Phase 7C 保持 `pending`，因此 Phase 7 总状态保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
+Phase 3 继续受 Approved Training Corpus 阻塞并保持 `pending`。Phase 6 与 Phase 7B 已完成。Phase 7C.1 已完成，Phase 7C.2 保持 `pending`，因此 Phase 7C 与 Phase 7 均保持 `in_progress`。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
 ## 14. 修改后的最低验证
 

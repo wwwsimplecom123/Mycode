@@ -607,12 +607,23 @@ Status: complete
 
 #### Phase 7C：安全 `.eml` 拖入检测
 
+Status: in_progress
+
+##### Phase 7C.1：安全、显式、本地 `.eml` 读取与检测内核
+
+Status: complete
+
+- 用户明确确认后，只读处理一个普通本地 `.eml`；拒绝网络/设备/ADS/重解析路径，并在读取前后复核文件身份。
+- 标准库 MIME 解析、集中资源上限、惰性 HTML 纯文本化、附件元数据最小化以及既有检测/加密证据/待确认上下文编排全部隐藏在两个深模块后。
+
+##### Phase 7C.2：安全 `.eml` 拖入 UI
+
 Status: pending
 
-- 只在独立安全设计、资源边界和隐私测试完成后实现 `.eml` 拖入检测。
-- 不复用浏览器作为控制台，不扩展为跨用户、管理员或中心后台功能。
+- 后续只通过 Phase 7C.1 interface 接入拖入或文件选择交互；不得让 UI 接触 MIME 实现。
+- 不复用浏览器作为控制台，不扩展为目录扫描、邮件客户端 adapter、跨用户、管理员或中心后台功能。
 
-Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7A、Phase 7B.1、Phase 7B.2A、Phase 7B.2B 与 Phase 7B 已完成；Phase 7C 仍为 `pending`，因此 Phase 7 总状态保持 `in_progress`。
+Phase 7 总完成条件：Phase 7A、Phase 7B 与 Phase 7C 均完成；桌面界面在最低分辨率下无重叠、低配置电脑交互流畅，数据全部来自当前用户本地加密记录。Phase 7B 与 Phase 7C.1 已完成；Phase 7C.2 保持 `pending`，Phase 7C 和 Phase 7 均保持 `in_progress`。
 
 ### Phase 8：Endpoint Release
 
@@ -694,4 +705,4 @@ Phase 3 因缺少真实、许可明确、人工审核且完成去重/泄漏隔�
 
 Phase 5A 已基于 Phase 4A.1 的可信本地检测 seam 完成严格 Native Messaging protocol、可测试 Host 和独立 chinaccs MV3 插件基础链路。Phase 5B 已完成稳定开发身份、可复现构建配置、注册生命周期脚本和源码 Host 自动化准备，但当前环境缺少离线 PyInstaller，尚无 `.exe`、默认 Chrome/Edge 注册或真实 chinaccs 验收，因此 Phase 5B 与 Phase 5 均保持 `in_progress`。下一步是在批准的离线构建环境产生 Host 后按 `docs/BROWSER_ACCEPTANCE.md` 完成两种浏览器验收。正式 Endpoint Release 仍被 Phase 3、Phase 4B 和发布门禁阻塞。
 
-Phase 6 已完成。Phase 7 保持 `in_progress`：Phase 7A、Phase 7B.1、Phase 7B.2A、Phase 7B.2B 与 Phase 7B 已完成；Phase 7C 仍为 `pending`。
+Phase 6 已完成。Phase 7 保持 `in_progress`：Phase 7B 与 Phase 7C.1 已完成；Phase 7C.2 保持 `pending`，所以 Phase 7C 保持 `in_progress`。

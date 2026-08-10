@@ -167,6 +167,8 @@ from .inference import (
     UnavailableModelAdapter,
 )
 from .local_detection import LocalDetectionService
+from .local_mail_intake import LocalMailIntakeError, LocalMailIntakeService
+from .safe_eml_intake import SafeEmlIntakeError, SafeEmlReader
 from .key_protection import (
     CurrentUserKeyProtector,
     KeyProtectionError,
@@ -301,6 +303,10 @@ __all__ = [
     "FeatureVectorValidationError",
     "LocalRuleEvaluator",
     "LocalDetectionService",
+    "LocalMailIntakeError",
+    "LocalMailIntakeService",
+    "SafeEmlIntakeError",
+    "SafeEmlReader",
     "NativeHostHandler",
     "run_native_host",
     "FeaturePipeline",

@@ -17,7 +17,7 @@
 
 ## 2. 当前实现状态
 
-当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6：加密证据存储、Confirmed Example Library 和一次性脱敏诊断包导出**、**Phase 7A：个人控制台应用服务与数据 ViewModel**、**Phase 7B.1：Windows 托盘与只读个人安全控制台**、**Phase 7B.2A：本地数据管理** 与 **Phase 7B.2B：安全事件确认**。Phase 7 总状态为 `in_progress`，Phase 7B 已完成，Phase 7C 保持 `pending`。
+当前已实现 **Phase 0：脚手架与约束测试**、**Phase 1：Feature Pipeline 与数据集治理**、开发期 **Phase 2：基线模型与评估**、**Phase 4A：模型无关 Detection Kernel**、**Phase 4A.1：本地规则评估与 Local Detection Service**、**Phase 5A：Native Messaging 协议、本地 Host 与独立 MV3 插件基础链路**、完整的 **Phase 6**、**Phase 7A**、完整的 **Phase 7B** 与 **Phase 7C.1：安全、显式、本地 `.eml` 读取与检测内核**。Phase 7C.2 保持 `pending`，因此 Phase 7C 与 Phase 7 均保持 `in_progress`。
 
 现有生产包只包含：
 

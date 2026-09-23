@@ -49,3 +49,12 @@ test('Gmail does not borrow a sender from an earlier message while rendering', (
   const dom = page('mail.google.com', gmail() + '<div class="adn"><div class="a3s">新消息尚未加载发件人</div></div>');
   assert.equal(extract(dom), null);
 });
+test('new QQ wx host reads its actual header structure, without borrowing recipient', () => {
+  const dom = page('wx.mail.qq.com', '<div class="mail-detail-subject"><span class="mail-subject-text">新QQ邮件</span><div>收藏</div></div><div class="mail-detail-basic"><div class="basic-body"><div class="basic-body-item"><span class="cmp-account-email">&lt;sender@example.com&gt;</span></div><div class="basic-body-item"><span class="cmp-account-email">recipient@example.com</span></div></div></div><div class="mail-detail-content"><div class="qmbox">测试正文<a href="https://example.com">链接</a></div></div>');
+  assert.equal(extract(dom).subject, '新QQ邮件');
+  assert.equal(extract(dom).sender, '<sender@example.com>');
+  assert.equal(extract(dom).body_text, '测试正文链接');
+  dom.window.document.querySelector('.basic-body-item:first-child').innerHTML = '';
+  assert.equal(extract(dom), null);
+  assert.ok(require('../../extension/manifest.json').content_scripts[0].matches.includes('https://wx.mail.qq.com/*'));
+});

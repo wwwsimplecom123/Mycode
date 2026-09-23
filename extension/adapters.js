@@ -2,10 +2,10 @@
   const adapters = [
     { name: 'gmail', hosts: ['mail.google.com'], containers: ['.adn'],
       body: ['.a3s.aiL', '.a3s'], subject: ['.hP'], sender: ['.gD[email]'], recipient: ['.g2[email]'] },
-    { name: 'qq-mail', hosts: ['mail.qq.com', 'exmail.qq.com'],
+    { name: 'qq-mail', hosts: ['mail.qq.com', 'wx.mail.qq.com', 'exmail.qq.com'],
       body: ['#mailContentContainer', '#mailContent', '.mailContent', '.mail-body', '.mail-detail-content'],
-      subject: ['#subject', '.mail-detail-subject', '.subject'],
-      sender: ['#fromaddr', '.mail-detail-sender [email]', '.sender [email]', '.sender', '.from'],
+      subject: ['#subject', '.mail-detail-subject .mail-subject-text', '.mail-detail-subject', '.subject'],
+      sender: ['#fromaddr', '.mail-detail-basic .basic-body-item:first-child .cmp-account-email', '.mail-detail-sender [email]', '.sender [email]', '.sender', '.from'],
       recipient: ['#toaddr', '.receiver'], frames: ['#mailContent', '#contentFrame', 'iframe[name="mailContent"]'] },
     { name: 'netease-mail', hosts: ['mail.163.com', 'mail.126.com', 'mail.yeah.net', 'qiye.163.com'],
       body: ['.mail-detail-content', '.mail-content', '.mailBody', '.mailContent', '.js-component-email-body'],

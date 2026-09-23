@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ShieldDome 企业邮件安全探针",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "连接 ShieldDome 企业平台的浏览器邮件风险探针",
   "permissions": [
     "storage"
@@ -33,7 +33,8 @@
         "https://outlook.office.com/*",
         "https://outlook.office365.com/*",
         "https://mail.google.com/*",
-        "https://webmail.chinaccs.cn/*"
+        "https://webmail.chinaccs.cn/*",
+        "https://wx.mail.qq.com/*"
       ],
       "js": [
         "adapters.js",

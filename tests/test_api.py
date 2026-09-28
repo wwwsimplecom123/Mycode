@@ -10,11 +10,14 @@ class PermissionMatrixTests(unittest.TestCase):
     def test_roles_separate_write_and_audit_capabilities(self):
         analyst = {"id": "a1", "role": "analyst", "permissions": permissions_for_role("analyst")}
         auditor = {"id": "u1", "role": "auditor", "permissions": permissions_for_role("auditor")}
+        admin = {"id": "admin-1", "role": "admin", "permissions": permissions_for_role("admin")}
 
         self.assertTrue(has_permission(analyst, "analysis:feedback"))
         self.assertFalse(has_permission(auditor, "analysis:feedback"))
         self.assertTrue(has_permission(auditor, "audit:read:any"))
         self.assertFalse(has_permission(auditor, "application:download"))
+        self.assertFalse(has_permission(analyst, "knowledge:approve"))
+        self.assertTrue(has_permission(admin, "knowledge:approve"))
         self.assertTrue(is_readonly_actor({**auditor, "data_scope": "all_readonly"}))
         self.assertEqual(
             analysis_scope(analyst),
@@ -200,6 +203,18 @@ class BrowserProbeApiTests(unittest.TestCase):
         self.assertEqual(disabled["completed"], 2)
         self.assertEqual(service.approved, ["k1", "k2"])
         self.assertEqual(service.disabled, ["k1", "k2"])
+
+    def test_admin_can_publish_knowledge_without_password_confirmation(self):
+        service = FakeKnowledgeService()
+        api_module.SERVICE = service
+        admin = {"id": "admin-1", "username": "admin", "role": "admin", "permissions": permissions_for_role("admin")}
+
+        approved = api_module.approve_knowledge("k1", _actor=admin)
+        bulk = api_module.bulk_approve_knowledge(api_module.KnowledgeBulkRequest(ids=["k2", "k3"]), _actor=admin)
+
+        self.assertEqual(approved, {"id": "k1", "status": "published"})
+        self.assertEqual(bulk["completed"], 2)
+        self.assertEqual(service.approved, ["k1", "k2", "k3"])
 
 
 if __name__ == "__main__":

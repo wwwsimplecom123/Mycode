@@ -63,7 +63,7 @@ async def browser_probe_cors(request: Request, call_next: Any) -> Response:
 
 
 class FeedbackRequest(BaseModel):
-    verdict: str = Field(pattern="^(false_positive|confirmed_phishing|uncertain)$")
+    verdict: str = Field(pattern="^(confirmed_benign|false_positive|confirmed_phishing|uncertain)$")
     comment: str = Field(default="", max_length=1000)
 
 
@@ -780,7 +780,6 @@ def knowledge_detail(item_id: str) -> dict[str, Any]:
 
 @app.post("/api/v1/knowledge/{item_id}/approve")
 def approve_knowledge(item_id: str, request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:approve"))) -> dict[str, Any]:
-    require_dangerous_confirmation(_actor, request or DangerousActionRequest(), "knowledge.approve", item_id)
     return SERVICE.approve_knowledge(item_id)
 
 
@@ -792,7 +791,6 @@ def disable_knowledge(item_id: str, request: DangerousActionRequest | None = Non
 
 @app.post("/api/v1/knowledge/bulk-approve")
 def bulk_approve_knowledge(request: KnowledgeBulkRequest, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:approve"))) -> dict[str, Any]:
-    require_dangerous_confirmation(_actor, request, "knowledge.bulk_approve", "knowledge")
     completed = 0
     failed: list[dict[str, str]] = []
     for item_id in request.ids:

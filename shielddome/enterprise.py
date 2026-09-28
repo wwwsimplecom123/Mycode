@@ -513,6 +513,7 @@ class EnterpriseService:
         if not analysis:
             raise KeyError(f"Unknown analysis_id: {analysis_id}")
         label_map = {
+            "confirmed_benign": "benign",
             "false_positive": "benign",
             "confirmed_phishing": "phishing",
             "uncertain": "unknown",
@@ -535,11 +536,11 @@ class EnterpriseService:
             },
         )
         knowledge_id = ""
-        if verdict in {"false_positive", "confirmed_phishing"}:
+        if verdict in {"confirmed_benign", "false_positive", "confirmed_phishing"}:
             parsed = analysis.get("parsed_message") or {}
             quick = analysis.get("quick_result") or {}
             result = analysis.get("result") or {}
-            source_type = "trusted_email" if verdict == "false_positive" else "phishing_case"
+            source_type = "trusted_email" if verdict in {"confirmed_benign", "false_positive"} else "phishing_case"
             content = "\n".join(
                 [
                     str(parsed.get("subject") or ""),

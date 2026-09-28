@@ -453,6 +453,18 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(reviewed["status"], "confirmed")
         self.assertEqual(len(self.db.confirmed_evaluation_dataset()), 1)
 
+    def test_confirmed_benign_feedback_creates_trusted_email_knowledge(self):
+        queued = self.service.ingest_eml("normal-newsletter.eml", SAMPLE_EML)
+        result = self.service.feedback(queued["analysis_id"], "confirmed_benign", "Confirmed as normal mail")
+
+        self.assertEqual(result["knowledge_promotion"], "pending_review")
+        item = next(item for item in self.db.list_knowledge() if item["id"] == result["knowledge_id"])
+        self.assertEqual(item["status"], "pending")
+        self.assertEqual(item["source_type"], "trusted_email")
+        self.assertEqual((item["metadata"] or {}).get("verdict"), "confirmed_benign")
+        label = self.db.get_analysis_label(result["label_id"])
+        self.assertEqual(label["label"], "benign")
+
     def test_local_admin_login_creates_revocable_session(self):
         login = self.service.auth.login("admin", "ChangeMe-Before-Production")
         self.assertEqual(login["user"]["role"], "admin")

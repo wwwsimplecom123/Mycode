@@ -18,6 +18,8 @@ class PermissionMatrixTests(unittest.TestCase):
         self.assertFalse(has_permission(auditor, "application:download"))
         self.assertFalse(has_permission(analyst, "knowledge:approve"))
         self.assertTrue(has_permission(admin, "knowledge:approve"))
+        self.assertFalse(has_permission(analyst, "user:delete"))
+        self.assertTrue(has_permission(admin, "user:delete"))
         self.assertTrue(is_readonly_actor({**auditor, "data_scope": "all_readonly"}))
         self.assertEqual(
             analysis_scope(analyst),

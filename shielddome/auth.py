@@ -107,6 +107,16 @@ class AuthService:
         updated = self.db.update_user(user_id, display_name.strip(), role, disabled)
         return self.public_managed_user(updated or {})
 
+    def delete_user(self, user_id: str) -> dict[str, Any]:
+        user = self.db.get_user_by_id(user_id)
+        if not user:
+            raise KeyError("用户不存在")
+        if user["role"] == "admin" and not bool(user.get("disabled")) and self.db.count_enabled_admins() <= 1:
+            raise ValueError("不能删除最后一个可用管理员")
+        if not self.db.delete_user(user_id):
+            raise KeyError("用户不存在")
+        return self.public_managed_user(user)
+
     def reset_password(self, user_id: str, password: str) -> None:
         if not self.db.get_user_by_id(user_id):
             raise KeyError("用户不存在")

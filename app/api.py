@@ -76,9 +76,6 @@ class KnowledgeTextRequest(BaseModel):
 
 class KnowledgeBulkRequest(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=500)
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 class PolicyRequest(BaseModel):
@@ -93,9 +90,6 @@ class DetectionPolicyRequest(BaseModel):
     high_risk_keywords: list[str]
     risk_thresholds: dict[str, int]
     trusted_include_subdomains: bool = True
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 class ProviderRequest(BaseModel):
@@ -106,9 +100,6 @@ class ProviderRequest(BaseModel):
     timeout: float | None = None
     api_key: str | None = Field(default=None, max_length=500)
     clear_api_key: bool = False
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -120,35 +111,20 @@ class CreateUserRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=12, max_length=300)
     role: str = Field(pattern="^(user|admin|analyst|auditor)$")
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 class UpdateUserRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     role: str = Field(pattern="^(user|admin|analyst|auditor)$")
     disabled: bool = False
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 class ResetPasswordRequest(BaseModel):
     password: str = Field(min_length=12, max_length=300)
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 class ReviewLabelRequest(BaseModel):
     status: str = Field(pattern="^(confirmed|rejected)$")
-
-
-class DangerousActionRequest(BaseModel):
-    confirm_password: str = ""
-    confirm_reason: str = ""
-    request_trace_id: str = ""
 
 
 def bearer_token(authorization: str) -> str:
@@ -320,23 +296,6 @@ def actor_name(actor: dict[str, Any] | str) -> str:
     return actor_username(actor) if isinstance(actor, dict) else str(actor)
 
 
-def require_dangerous_confirmation(actor: dict[str, Any] | str, request: Any, action: str, target: str) -> None:
-    if not isinstance(actor, dict):
-        return
-    if not has_permission(actor, "dangerous:confirm"):
-        raise HTTPException(status_code=403, detail="missing dangerous operation permission")
-    password = str(getattr(request, "confirm_password", "") or "")
-    reason = str(getattr(request, "confirm_reason", "") or "").strip()
-    trace_id = str(getattr(request, "request_trace_id", "") or "").strip()
-    if len(reason) < 3 or not password:
-        SERVICE.db.record_audit(actor_username(actor), "dangerous_confirmation.missing", target, {"action": action, "trace_id": trace_id})
-        raise HTTPException(status_code=400, detail="dangerous operation requires password and reason")
-    if not SERVICE.auth.verify_user_password(str(actor.get("id") or ""), password):
-        SERVICE.db.record_audit(actor_username(actor), "dangerous_confirmation.failed", target, {"action": action, "trace_id": trace_id})
-        raise HTTPException(status_code=403, detail="dangerous operation confirmation failed")
-    SERVICE.db.record_audit(actor_username(actor), "dangerous_confirmation.accepted", target, {"action": action, "reason": reason[:300], "trace_id": trace_id})
-
-
 def public_provider_config(config: dict[str, Any]) -> dict[str, Any]:
     result = dict(config)
     if result.get("api_key_masked"):
@@ -446,7 +405,8 @@ def ensure_analysis_visible(item: dict[str, Any], actor: dict[str, Any]) -> None
     submitted = (item.get("parsed_message") or {}).get("submitted_by") or {}
     if str(submitted.get("id") or "") == str(actor.get("id") or ""):
         return
-    if str(submitted.get("username") or "") == actor_username(actor):
+    submitted_username = str(submitted.get("username") or "")
+    if submitted_username and submitted_username == actor_username(actor):
         return
     raise HTTPException(status_code=403, detail="无权查看其他用户提交的邮件检测")
 
@@ -540,7 +500,7 @@ def me_plugin_token(actor: dict[str, Any] = Depends(require_permission("me:plugi
 
 
 @app.post("/api/me/plugin-token")
-def rotate_me_plugin_token(request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
+def rotate_me_plugin_token(actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
     try:
         issued = SERVICE.auth.issue_plugin_token(str(actor.get("id") or ""))
         SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_rotated", str(actor.get("id") or ""))
@@ -552,7 +512,7 @@ def rotate_me_plugin_token(request: DangerousActionRequest | None = None, actor:
 
 
 @app.delete("/api/me/plugin-token")
-def revoke_me_plugin_token(request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
+def revoke_me_plugin_token(actor: dict[str, Any] = Depends(require_permission("me:plugin_token"))) -> dict[str, str]:
     try:
         SERVICE.auth.revoke_plugin_token(str(actor.get("id") or ""))
         SERVICE.db.record_audit(actor_username(actor), "me.plugin_token_revoked", str(actor.get("id") or ""))
@@ -779,13 +739,12 @@ def knowledge_detail(item_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/knowledge/{item_id}/approve")
-def approve_knowledge(item_id: str, request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:approve"))) -> dict[str, Any]:
+def approve_knowledge(item_id: str, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:approve"))) -> dict[str, Any]:
     return SERVICE.approve_knowledge(item_id)
 
 
 @app.post("/api/v1/knowledge/{item_id}/disable")
-def disable_knowledge(item_id: str, request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:disable"))) -> dict[str, Any]:
-    require_dangerous_confirmation(_actor, request or DangerousActionRequest(), "knowledge.disable", item_id)
+def disable_knowledge(item_id: str, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:disable"))) -> dict[str, Any]:
     return SERVICE.disable_knowledge(item_id)
 
 
@@ -804,7 +763,6 @@ def bulk_approve_knowledge(request: KnowledgeBulkRequest, _actor: dict[str, Any]
 
 @app.post("/api/v1/knowledge/bulk-disable")
 def bulk_disable_knowledge(request: KnowledgeBulkRequest, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:disable"))) -> dict[str, Any]:
-    require_dangerous_confirmation(_actor, request, "knowledge.bulk_disable", "knowledge")
     completed = 0
     failed: list[dict[str, str]] = []
     for item_id in request.ids:
@@ -817,8 +775,7 @@ def bulk_disable_knowledge(request: KnowledgeBulkRequest, _actor: dict[str, Any]
 
 
 @app.post("/api/v1/knowledge/reindex")
-def reindex_knowledge(request: DangerousActionRequest | None = None, _actor: dict[str, Any] | str = Depends(require_permission("knowledge:reindex"))) -> dict[str, Any]:
-    require_dangerous_confirmation(_actor, request or DangerousActionRequest(), "knowledge.reindex", "knowledge")
+def reindex_knowledge(_actor: dict[str, Any] | str = Depends(require_permission("knowledge:reindex"))) -> dict[str, Any]:
     return SERVICE.reindex_knowledge()
 
 
@@ -834,7 +791,6 @@ def provider_settings() -> dict[str, Any]:
 
 @app.put("/api/v1/settings/providers")
 def update_provider_settings(request: ProviderRequest, _actor: dict[str, Any] = Depends(require_permission("provider:update"))) -> dict[str, Any]:
-    require_dangerous_confirmation(_actor, request, "provider.update", "provider")
     try:
         return public_provider_config(SERVICE.configure_provider(request.model_dump(exclude_none=True)))
     except (ValueError, RuntimeError) as exc:
@@ -853,7 +809,6 @@ def detection_policy_settings() -> dict[str, Any]:
 
 @app.put("/api/v1/settings/detection-policy")
 def update_detection_policy(request: DetectionPolicyRequest, actor: dict[str, Any] = Depends(require_permission("policy:update"))) -> dict[str, Any]:
-    require_dangerous_confirmation(actor, request, "policy.update", "detection_policy")
     try:
         return SERVICE.configure_detection_policy(request.model_dump(), actor_username(actor))
     except ValueError as exc:
@@ -917,7 +872,6 @@ def create_user(request: CreateUserRequest, actor: dict[str, Any] = Depends(requ
 
 @app.put("/api/v1/users/{user_id}")
 def update_user(user_id: str, request: UpdateUserRequest, actor: dict[str, Any] = Depends(require_permission("user:update"))) -> dict[str, Any]:
-    require_dangerous_confirmation(actor, request, "user.update", user_id)
     target = SERVICE.db.get_user_by_id(user_id)
     if target and target["username"] == actor_username(actor) and request.disabled:
         raise HTTPException(status_code=400, detail="不能停用当前登录账号")
@@ -931,9 +885,28 @@ def update_user(user_id: str, request: UpdateUserRequest, actor: dict[str, Any] 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.delete("/api/v1/users/{user_id}")
+def delete_user(user_id: str, actor: dict[str, Any] = Depends(require_permission("user:delete"))) -> dict[str, str]:
+    target = SERVICE.db.get_user_by_id(user_id)
+    if target and str(target.get("id") or "") == str(actor.get("id") or ""):
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    try:
+        deleted = SERVICE.auth.delete_user(user_id)
+        SERVICE.db.record_audit(
+            actor_username(actor),
+            "user.deleted",
+            user_id,
+            {"username": deleted.get("username"), "role": deleted.get("role")},
+        )
+        return {"status": "deleted"}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/v1/users/{user_id}/reset-password")
 def reset_user_password(user_id: str, request: ResetPasswordRequest, actor: dict[str, Any] = Depends(require_permission("user:reset_password"))) -> dict[str, str]:
-    require_dangerous_confirmation(actor, request, "user.reset_password", user_id)
     try:
         SERVICE.auth.reset_password(user_id, request.password)
         SERVICE.db.record_audit(actor_username(actor), "user.password_reset", user_id)
@@ -945,7 +918,7 @@ def reset_user_password(user_id: str, request: ResetPasswordRequest, actor: dict
 
 
 @app.post("/api/v1/users/{user_id}/plugin-token")
-def rotate_user_plugin_token(user_id: str, request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
+def rotate_user_plugin_token(user_id: str, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
     try:
         issued = SERVICE.auth.issue_plugin_token(user_id)
         SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_rotated", user_id)
@@ -957,7 +930,7 @@ def rotate_user_plugin_token(user_id: str, request: DangerousActionRequest | Non
 
 
 @app.delete("/api/v1/users/{user_id}/plugin-token")
-def revoke_user_plugin_token(user_id: str, request: DangerousActionRequest | None = None, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
+def revoke_user_plugin_token(user_id: str, actor: dict[str, Any] = Depends(require_permission("user:plugin_token"))) -> dict[str, str]:
     try:
         SERVICE.auth.revoke_plugin_token(user_id)
         SERVICE.db.record_audit(actor_username(actor), "user.plugin_token_revoked", user_id)

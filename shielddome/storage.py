@@ -774,6 +774,17 @@ class Database:
             self.revoke_user_plugin_tokens(user_id)
         return self.get_user_by_id(user_id)
 
+    def delete_user(self, user_id: str) -> bool:
+        """Delete account credentials while retaining historical business records."""
+        with self.connect() as connection:
+            existing = self._fetchone_on(connection, "SELECT id FROM users WHERE id = ?", [user_id])
+            if not existing:
+                return False
+            self._execute(connection, "DELETE FROM sessions WHERE user_id = ?", [user_id])
+            self._execute(connection, "DELETE FROM plugin_tokens WHERE user_id = ?", [user_id])
+            self._execute(connection, "DELETE FROM users WHERE id = ?", [user_id])
+        return True
+
     def set_user_password(self, user_id: str, password_hash: str) -> None:
         self._execute_direct(
             "UPDATE users SET password_hash = ?, failed_attempts = 0, lock_until = NULL, updated_at = ? WHERE id = ?",

@@ -139,14 +139,6 @@ function can(permission) {
   return false;
 }
 
-function dangerousPayload(action, options = {}) {
-  const confirm_password = window.prompt(`${action}\n请输入当前密码进行二次确认`) || "";
-  if (!confirm_password) return null;
-  const confirm_reason = options.reason || window.prompt("请输入本次高危操作原因") || "";
-  if (!confirm_reason.trim()) return null;
-  return { confirm_password, confirm_reason, request_trace_id: `${Date.now()}-${Math.random().toString(16).slice(2)}` };
-}
-
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: "same-origin", ...options, headers: { ...headers.value, ...(options.headers || {}) } });
   if (response.status === 401 && !path.includes("/auth/login")) {
@@ -404,6 +396,7 @@ function auditActionLabel(action) {
     "analysis.created": "创建邮件检测",
     "analysis.completed": "完成邮件检测",
     "analysis.feedback": "提交检测反馈",
+    "user.deleted": "删除用户",
     "application.downloaded": "下载应用",
   };
   return labels[action] || action?.replaceAll(".", " / ") || "系统操作";
@@ -556,14 +549,10 @@ async function approve(item) {
 async function disableKnowledge(item) {
   knowledgeMessage.value = "";
   if (!item?.id || knowledgeActionId.value || approvalBusy.value) return;
-  const confirmation = dangerousPayload("停用知识");
-  if (!confirmation) return;
   knowledgeActionId.value = item.id;
   try {
     await api(`/api/v1/knowledge/${item.id}/disable`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(confirmation),
     });
     knowledgeMessage.value = "知识已停用，不再参与后续 RAG 检索。";
     await refreshAndKeepKnowledge(item.id);
@@ -580,8 +569,6 @@ async function bulkKnowledgeAction(action) {
   const isApprove = action === "approve";
   const text = isApprove ? "发布" : "停用";
   if (!window.confirm(`确定批量${text}选中的 ${ids.length} 条知识？`)) return;
-  const confirmation = isApprove ? {} : dangerousPayload(`批量${text}知识`);
-  if (!isApprove && !confirmation) return;
   approvalBusy.value = true;
   knowledgeMessage.value = `正在批量${text} ${ids.length} 条知识...`;
   try {
@@ -590,7 +577,7 @@ async function bulkKnowledgeAction(action) {
       results.push(await api(`/api/v1/knowledge/bulk-${isApprove ? "approve" : "disable"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: ids.slice(offset, offset + 500), ...confirmation }),
+        body: JSON.stringify({ ids: ids.slice(offset, offset + 500) }),
       }));
     }
     const completed = results.reduce((total, result) => total + Number(result.completed || 0), 0);
@@ -609,15 +596,11 @@ async function bulkKnowledgeAction(action) {
 
 async function reindexKnowledge() {
   if (!window.confirm("确定重建已导入知识的向量索引？该操作可能需要一些时间。")) return;
-  const confirmation = dangerousPayload("重建向量索引");
-  if (!confirmation) return;
   knowledgeBusy.value = true;
     knowledgeMessage.value = "正在重建知识向量索引...";
   try {
     const result = await api("/api/v1/knowledge/reindex", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(confirmation),
     });
     knowledgeMessage.value = `已加入后台向量化队列：${result.queued ?? result.completed} 条。可在系统状态查看 RAG 队列。`;
     await refresh();
@@ -648,8 +631,6 @@ function policyLines(value) {
 }
 
 async function saveDetectionPolicy() {
-  const confirmation = dangerousPayload("启用检测策略");
-  if (!confirmation) return;
   policyBusy.value = true;
   policyMessage.value = "";
   try {
@@ -668,7 +649,6 @@ async function saveDetectionPolicy() {
           high: Number(policyForm.value.high),
           critical: Number(policyForm.value.critical),
         },
-        ...confirmation,
       }),
     });
     setPolicyForm(saved);
@@ -698,8 +678,6 @@ async function saveProviders() {
     providerMessage.value = validationError;
     return;
   }
-  const confirmation = dangerousPayload("修改模型配置");
-  if (!confirmation) return;
   providerBusy.value = true;
   providerMessage.value = "";
   try {
@@ -713,7 +691,6 @@ async function saveProviders() {
         embedding_model: providers.value.embedding_model,
         timeout: providers.value.timeout,
         api_key: providerKey.value || undefined,
-        ...confirmation,
       }),
     });
     providerKey.value = "";
@@ -744,14 +721,12 @@ async function testProviders() {
 
 async function clearProviderKey() {
   if (!window.confirm("确定清除网页保存的模型 API Key？清除后模型分析会降级。")) return;
-  const confirmation = dangerousPayload("清除模型 API Key");
-  if (!confirmation) return;
   providerBusy.value = true;
   try {
     providers.value = await api("/api/v1/settings/providers", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clear_api_key: true, ...confirmation }),
+      body: JSON.stringify({ clear_api_key: true }),
     });
     providerKey.value = "";
     providerMessage.value = "网页保存的 API Key 已清除。";
@@ -866,13 +841,11 @@ async function copyIssuedPluginToken() {
 
 async function updateUserAccount(item, disabled = item.disabled) {
   actionMessage.value = "";
-  const confirmation = dangerousPayload(disabled ? "停用或修改用户" : "启用或修改用户");
-  if (!confirmation) return;
   try {
     await api(`/api/v1/users/${item.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: item.display_name, role: item.role, disabled, ...confirmation }),
+      body: JSON.stringify({ display_name: item.display_name, role: item.role, disabled }),
     });
     users.value = await api("/api/v1/users").then((x) => x.items);
     actionMessage.value = "用户信息已更新。";
@@ -884,17 +857,27 @@ async function updateUserAccount(item, disabled = item.disabled) {
 async function resetUserPassword(item) {
   const password = window.prompt(`请输入 ${item.username} 的新密码（至少 12 位）`);
   if (!password) return;
-  const confirmation = dangerousPayload("重置用户密码");
-  if (!confirmation) return;
   try {
     await api(`/api/v1/users/${item.id}/reset-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password, ...confirmation }),
+      body: JSON.stringify({ password }),
     });
     actionMessage.value = "密码已重置，该用户的既有会话已撤销。";
   } catch (error) {
     actionMessage.value = `操作失败：${readError(error)}`;
+  }
+}
+
+async function deleteUserAccount(item) {
+  if (!window.confirm(`确定永久删除用户 ${item.username}？该用户将无法登录，插件 Token 也会立即失效。历史检测与审计记录会保留。`)) return;
+  actionMessage.value = "";
+  try {
+    await api(`/api/v1/users/${item.id}`, { method: "DELETE" });
+    users.value = await api("/api/v1/users").then((x) => x.items);
+    actionMessage.value = `用户 ${item.username} 已删除，历史检测与审计记录已保留。`;
+  } catch (error) {
+    actionMessage.value = `删除失败：${readError(error)}`;
   }
 }
 
@@ -1249,7 +1232,7 @@ onBeforeUnmount(() => {
                   <td><span :class="['status-pill', item.disabled ? 'off' : 'on']">{{ item.disabled ? '已停用' : '正常' }}</span></td>
                   <td><span :class="['status-pill', item.plugin_token_configured ? 'on' : 'off']">{{ item.plugin_token_configured ? item.plugin_token_prefix + '...' : '未签发' }}</span></td>
                   <td>{{ item.plugin_token_last_used_at?.slice(0,16).replace('T',' ') || '-' }}</td>
-                  <td class="actions"><button v-if="can('user:update')" @click="updateUserAccount(item)">保存</button><button v-if="can('user:reset_password')" @click="resetUserPassword(item)">重置密码</button><button v-if="can('user:plugin_token')" @click="rotatePluginToken(item)" :disabled="item.disabled">{{ item.plugin_token_configured ? '轮换 Token' : '签发 Token' }}</button><button v-if="can('user:plugin_token') && item.plugin_token_configured" class="danger" @click="revokePluginToken(item)">撤销 Token</button><button v-if="can('user:update')" :class="{danger:!item.disabled}" @click="updateUserAccount(item,!item.disabled)">{{ item.disabled ? '启用' : '停用' }}</button></td>
+                  <td class="actions"><button v-if="can('user:update')" @click="updateUserAccount(item)">保存</button><button v-if="can('user:reset_password')" @click="resetUserPassword(item)">重置密码</button><button v-if="can('user:plugin_token')" @click="rotatePluginToken(item)" :disabled="item.disabled">{{ item.plugin_token_configured ? '轮换 Token' : '签发 Token' }}</button><button v-if="can('user:plugin_token') && item.plugin_token_configured" class="danger" @click="revokePluginToken(item)">撤销 Token</button><button v-if="can('user:update')" :class="{danger:!item.disabled}" @click="updateUserAccount(item,!item.disabled)">{{ item.disabled ? '启用' : '停用' }}</button><button v-if="can('user:delete') && item.id !== user?.id" class="danger" @click="deleteUserAccount(item)">删除</button></td>
                 </tr></tbody>
               </table>
             </article>

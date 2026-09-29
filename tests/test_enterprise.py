@@ -215,6 +215,33 @@ class EnterpriseTests(unittest.TestCase):
         self.assertEqual(parsed["authentication"]["dmarc"], "pass")
         self.assertEqual(parsed["links"][0]["href"], "https://evil-login.com/reset")
 
+    def test_delete_user_removes_credentials_but_keeps_analysis_history(self):
+        managed = self.service.auth.create_user("delete.me", "LongPassword!123", "Delete Me", "analyst")
+        public = self.service.auth.public_user(self.db.get_user_by_id(managed["id"]) or {})
+        session = self.service.auth.login("delete.me", "LongPassword!123")["token"]
+        plugin = self.service.auth.issue_plugin_token(managed["id"])["token"]
+        queued = self.service.ingest_browser_probe(
+            {
+                "subject": "Routine notice",
+                "sender": "sender@example.com",
+                "body_text": "This is a routine internal notice with enough content.",
+                "links": [],
+            },
+            public,
+        )
+
+        deleted = self.service.auth.delete_user(managed["id"])
+
+        self.assertEqual(deleted["username"], "delete.me")
+        self.assertIsNone(self.db.get_user_by_id(managed["id"]))
+        self.assertIsNone(self.service.auth.authenticate(session))
+        self.assertIsNone(self.service.auth.authenticate_plugin_token(plugin))
+        self.assertIsNotNone(self.db.get_analysis(queued["analysis_id"]))
+
+        admin = self.db.get_user_by_username("admin") or {}
+        with self.assertRaisesRegex(ValueError, "最后一个可用管理员"):
+            self.service.auth.delete_user(str(admin.get("id") or ""))
+
     def test_parser_discards_glued_invalid_url_and_private_link_stays_low_risk(self):
         parsed = parse_eml(BENIGN_PRIVATE_LINK_EML)
         self.assertEqual([link["href"] for link in parsed["links"]], ["https://10.24.200.9/"])

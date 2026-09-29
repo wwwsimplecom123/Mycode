@@ -38,10 +38,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         "knowledge:read:published", "knowledge:draft:create", "knowledge:draft:update:self",
         "knowledge:submit", "knowledge:approve", "knowledge:disable", "knowledge:reindex",
         "policy:read", "policy:update", "provider:read", "provider:update", "provider:test",
-        "user:read", "user:create", "user:update", "user:reset_password", "user:plugin_token",
+        "user:read", "user:create", "user:update", "user:delete", "user:reset_password", "user:plugin_token",
         "audit:read:self", "audit:read:any", "audit:export",
         "system:read:summary", "system:read:full",
-        "application:download", "application:manage", "me:plugin_token", "dangerous:confirm",
+        "application:download", "application:manage", "me:plugin_token",
     }),
 }
 
